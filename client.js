@@ -8,10 +8,10 @@ window.__ModuleLoader__.load({
     const MODELS = '/plugins/dsh-deepseek-model-route/models'
     const ROLES = ['plan', 'impl', 'review']
     const ROLE_LABEL = { plan: '规划', impl: '实现', review: '审查' }
-    const ROLE_HINT = { plan: '读代码、写方案', impl: '改文件的主力', review: '只读、找缺陷' }
+    const ROLE_HINT = { plan: '读代码出方案', impl: '改文件的主力', review: '只读、找缺陷' }
 
     // ── 视觉 ────────────────────────────────────────────────────────────────
-    const GRID = '76px minmax(150px,1fr) minmax(190px,1.3fr) 104px 128px'
+    const GRID = '96px minmax(150px,1fr) minmax(190px,1.3fr) 96px 128px'
     const S = {
       section: {
         marginTop: 28, paddingTop: 20, borderTop: '1px solid rgba(127,127,127,.22)',
@@ -125,6 +125,7 @@ window.__ModuleLoader__.load({
         h('select', {
           style: S.select,
           value: entry.lifecycle ?? 'continuable',
+          title: '可续跑：跑完仍可用 send_message 续同一个子代理。交付即释放：拿到结果就释放激活，之后续跑要走冷恢复。',
           onChange: (event) => onChange({ lifecycle: event.target.value }),
         },
           h('option', { value: 'continuable' }, '可续跑'),
@@ -199,7 +200,7 @@ window.__ModuleLoader__.load({
             h('span', null, '阶段'),
             h('span', null, '供应商'),
             h('span', null, '模型'),
-            h('span', null, 'effort'),
+            h('span', null, '推理强度'),
             h('span', null, '生命周期'),
           ),
           ROLES.map((role) => h(RoleLine, {
