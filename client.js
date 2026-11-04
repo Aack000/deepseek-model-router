@@ -188,7 +188,6 @@ window.__ModuleLoader__.load({
           '三个阶段的子代理各走各的模型。每次派活都会重新读这份配置，所以保存后下一个子代理就生效，不需要重装。下拉里的选项来自运行时真实可用的模型。',
           h('br'),
           '配置文件：', h('code', { style: S.code }, state.path || '读取中…'),
-          h('span', { style: S.note }, '默认取 DSH_HOME 环境变量，不是写死的路径'),
         ),
 
         catalog.error

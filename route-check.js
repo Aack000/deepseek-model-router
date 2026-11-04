@@ -71,11 +71,28 @@ const ROLE_TOOLS = {
   review_subagent: { role: 'review', label: '审查' },
   subagent: { role: 'generic', label: '通用' },
 };
-const DEFAULT_EXPECT = {
-  plan_subagent: 'deepseek-account/deepseek-v4-pro',
-  impl_subagent: 'deepseek-account/deepseek-flash',
-  review_subagent: 'deepseek-account/deepseek-v4-pro',
-};
+// 期望值来自路由表，不写死型号：改了 dmr.json，核对口径跟着改。
+// 表里没有某个角色（或整个文件不存在）→ 该角色不比对，只列实际值。
+const ROUTE_FILE = path.join(process.env.DSH_HOME || path.join(os.homedir(), '.dsh'), 'dmr.json');
+function loadRouteExpectations() {
+  const expect = {};
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(ROUTE_FILE, 'utf8'));
+  } catch {
+    return expect;
+  }
+  const roles = (parsed && typeof parsed.roles === 'object' && parsed.roles) || {};
+  for (const [tool, meta] of Object.entries(ROLE_TOOLS)) {
+    const entry = roles[meta.role];
+    if (!entry || typeof entry !== 'object') continue;
+    const provider = typeof entry.provider === 'string' ? entry.provider.trim() : '';
+    const model = typeof entry.model === 'string' ? entry.model.trim() : '';
+    if (provider !== '' && model !== '') expect[tool] = `${provider}/${model}`;
+  }
+  return expect;
+}
+const DEFAULT_EXPECT = loadRouteExpectations();
 /** --expect 的角色键 → 工具名（也接受完整工具名） */
 const EXPECT_KEYS = {
   plan: 'plan_subagent',
@@ -386,11 +403,17 @@ function collectDispatches(events, fromMs) {
       if (callId === null) continue;
       const row = byCallId.get(callId);
       if (!row || row.child !== null) continue;
-      const match = STARTED_SUBAGENT_RE.exec(resultText(event.data));
+      const text = resultText(event.data);
+      const match = STARTED_SUBAGENT_RE.exec(text);
       if (match) {
         row.child = normalizeSessionId(match[2]);
         row.status = 'started';
       }
+      // DMR 的派活工具会把当时生效的路由写进返回文本（`route: provider/model @effort`）。
+      // 拿它当期望，比拿当前 dmr.json 准：改过表之后，历史轮次仍按当时的声明核对，
+      // 而「声明了 A、实际跑了 B」这种真正的路由事故照样能抓出来。
+      const claim = /route:\s*([^\s,)]+)/.exec(text);
+      if (claim) row.claimed = claim[1];
     }
   }
 
@@ -535,7 +558,8 @@ function evaluate(rows, entries, parentEntry, expect, withCost = false) {
   const siblings = entries.filter((entry) => entry.slug === parentEntry.slug);
 
   return rows.map((row) => {
-    const expected = Object.prototype.hasOwnProperty.call(expect, row.tool) ? expect[row.tool] : null;
+    const expected = row.claimed
+    ?? (Object.prototype.hasOwnProperty.call(expect, row.tool) ? expect[row.tool] : null);
     const base = {
       role: row.role,
       roleLabel: row.roleLabel,
@@ -756,7 +780,11 @@ function printTable(parentId, rows, summary, cost = null) {
     lines.push(row.map((value, index) => padCell(value, widths[index])).join('  ').trimEnd());
   }
   lines.push(`${summary.mismatched}/${summary.total} 不符`);
+  if (summary.mismatched > 0) lines.push('（期望取自该次派活的声明路由；没有声明时回退到当前 dmr.json）');
   if (summary.unknown > 0) lines.push(`unknown: ${summary.unknown}`);
+  if (summary.unchecked > 0) {
+    lines.push(`${summary.unchecked} 行未比对（dmr.json 里没有对应角色的路由，或两者都没有期望）`);
+  }
   if (cost !== null) {
     lines.push(costLine(cost));
     if (cost.unpriced) lines.push(COST_DEFAULT_NOTE);
