@@ -8,27 +8,61 @@ window.__ModuleLoader__.load({
     const MODELS = '/plugins/dsh-deepseek-model-route/models'
     const ROLES = ['plan', 'impl', 'review']
     const ROLE_LABEL = { plan: '规划', impl: '实现', review: '审查' }
+    const ROLE_HINT = { plan: '读代码、写方案', impl: '改文件的主力', review: '只读、找缺陷' }
 
-    const box = { display: 'flex', flexDirection: 'column', gap: 14, padding: '4px 2px 20px', color: 'inherit' }
-    const muted = { opacity: 0.7, fontSize: 12, lineHeight: 1.6 }
-    const row = { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }
-    const button = {
-      padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
-      border: '1px solid rgba(127,127,127,.45)', background: 'transparent', color: 'inherit', fontSize: 13,
+    // ── 视觉 ────────────────────────────────────────────────────────────────
+    const GRID = '76px minmax(150px,1fr) minmax(190px,1.3fr) 104px 128px'
+    const S = {
+      section: {
+        marginTop: 28, paddingTop: 20, borderTop: '1px solid rgba(127,127,127,.22)',
+        display: 'flex', flexDirection: 'column', gap: 14, color: 'inherit',
+      },
+      title: { fontSize: 15, fontWeight: 600, letterSpacing: '.01em' },
+      desc: { fontSize: 12.5, lineHeight: 1.7, opacity: 0.72, maxWidth: 720 },
+      panel: { border: '1px solid rgba(127,127,127,.22)', borderRadius: 10, overflow: 'hidden', background: 'rgba(127,127,127,.04)' },
+      head: {
+        display: 'grid', gridTemplateColumns: GRID, gap: 10, alignItems: 'center', padding: '8px 14px',
+        fontSize: 11.5, opacity: 0.6, borderBottom: '1px solid rgba(127,127,127,.18)',
+      },
+      liner: {
+        display: 'grid', gridTemplateColumns: GRID, gap: 10, alignItems: 'center',
+        padding: '10px 14px', borderBottom: '1px solid rgba(127,127,127,.1)',
+      },
+      roleCell: { display: 'flex', flexDirection: 'column', gap: 2 },
+      roleName: { fontSize: 13, fontWeight: 500 },
+      roleHint: { fontSize: 11, opacity: 0.55 },
+      select: {
+        width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 12.5, borderRadius: 7,
+        border: '1px solid rgba(127,127,127,.3)', background: 'rgba(127,127,127,.05)',
+        color: 'inherit', cursor: 'pointer',
+      },
+      footer: { display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', flexWrap: 'wrap' },
+      btn: {
+        padding: '6px 14px', borderRadius: 7, fontSize: 12.5, cursor: 'pointer',
+        border: '1px solid rgba(127,127,127,.35)', background: 'transparent', color: 'inherit',
+      },
+      btnPrimary: {
+        padding: '6px 16px', borderRadius: 7, fontSize: 12.5, cursor: 'pointer',
+        border: '1px solid transparent', background: '#3b82f6', color: '#fff', fontWeight: 500,
+      },
+      spacer: { flex: 1 },
+      ok: { fontSize: 12, color: '#3c9d5d' },
+      bad: { fontSize: 12, color: '#d9534f' },
+      note: { fontSize: 11.5, opacity: 0.55, marginLeft: 4 },
+      code: {
+        fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: 11.5,
+        padding: '1px 5px', borderRadius: 4, background: 'rgba(127,127,127,.12)',
+      },
+      textarea: {
+        fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: 12,
+        lineHeight: 1.55, width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 8,
+        border: '1px solid rgba(127,127,127,.25)', background: 'rgba(127,127,127,.05)',
+        color: 'inherit', resize: 'vertical', tabSize: 2, marginTop: 8,
+      },
+      summary: { fontSize: 12, cursor: 'pointer', opacity: 0.7, userSelect: 'none' },
     }
-    const select = {
-      padding: '4px 6px', borderRadius: 6, border: '1px solid rgba(127,127,127,.45)',
-      background: 'transparent', color: 'inherit', fontSize: 13, minWidth: 150,
-    }
-    const mono = {
-      fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: 12, lineHeight: 1.5,
-      width: '100%', boxSizing: 'border-box', padding: 10, borderRadius: 6,
-      border: '1px solid rgba(127,127,127,.45)', background: 'rgba(127,127,127,.06)', color: 'inherit',
-      resize: 'vertical', tabSize: 2,
-    }
-    const bad = { color: '#d9534f', fontSize: 12 }
-    const okText = { color: '#3c9d5d', fontSize: 12 }
 
+    // ── 数据 ────────────────────────────────────────────────────────────────
     function parse(text) {
       try {
         const parsed = JSON.parse(text)
@@ -39,56 +73,57 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** Rewrite one role in the JSON text so every control keeps a single source of truth. */
     function withRole(text, role, patch) {
       const parsed = parse(text)
       const table = parsed.table ?? { roles: {} }
       const roles = { ...(table.roles ?? {}) }
-      roles[role] = { ...(roles[role] ?? {}), ...patch }
+      const next = { ...(roles[role] ?? {}), ...patch }
+      for (const key of Object.keys(next)) if (next[key] === undefined) delete next[key]
+      roles[role] = next
       return JSON.stringify({ ...table, roles }, null, 2)
     }
 
-    function RoleRow({ role, entry, providers, onChange }) {
+    function RoleLine({ role, entry, providers, onChange }) {
       const provider = providers.find((item) => item.id === entry.provider)
       const models = provider?.models ?? []
       const model = models.find((item) => item.id === entry.model)
       const efforts = model?.efforts ?? []
-      return h('div', { style: { ...row, gap: 10 } },
-        h('span', { style: { width: 42, opacity: 0.8, fontSize: 13 } }, ROLE_LABEL[role] ?? role),
+      return h('div', { style: S.liner },
+        h('div', { style: S.roleCell },
+          h('span', { style: S.roleName }, ROLE_LABEL[role] ?? role),
+          h('span', { style: S.roleHint }, ROLE_HINT[role] ?? ''),
+        ),
         h('select', {
-          style: select,
+          style: S.select,
           value: entry.provider ?? '',
           onChange: (event) => {
-            const next = event.target.value
-            const target = providers.find((item) => item.id === next)
+            const target = providers.find((item) => item.id === event.target.value)
             const first = target?.models?.[0]
-            onChange({ provider: next, ...(first ? { model: first.id, ...(first.defaultEffort ? { effort: first.defaultEffort } : {}) } : {}) })
+            onChange({ provider: event.target.value, ...(first ? { model: first.id } : {}) })
           },
         },
           providers.length === 0 ? h('option', { value: entry.provider ?? '' }, entry.provider ?? '—') : null,
           providers.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id)),
         ),
         h('select', {
-          style: { ...select, minWidth: 210 },
+          style: S.select,
           value: entry.model ?? '',
-          onChange: (event) => {
-            const next = models.find((item) => item.id === event.target.value)
-            onChange({ model: event.target.value, ...(next?.defaultEffort ? { effort: next.defaultEffort } : {}) })
-          },
+          onChange: (event) => onChange({ model: event.target.value }),
         },
           models.length === 0 ? h('option', { value: entry.model ?? '' }, entry.model ?? '—') : null,
           models.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id)),
         ),
         h('select', {
-          style: { ...select, minWidth: 96 },
+          style: S.select,
           value: entry.effort ?? '',
           onChange: (event) => onChange({ effort: event.target.value || undefined }),
         },
-          h('option', { value: '' }, 'effort 默认'),
-          (efforts.length > 0 ? efforts : ['off', 'low', 'high', 'max']).map((effort) => h('option', { key: effort, value: effort }, effort)),
+          h('option', { value: '' }, '默认'),
+          (efforts.length > 0 ? efforts : ['off', 'low', 'high', 'max'])
+            .map((effort) => h('option', { key: effort, value: effort }, effort)),
         ),
         h('select', {
-          style: { ...select, minWidth: 118 },
+          style: S.select,
           value: entry.lifecycle ?? 'continuable',
           onChange: (event) => onChange({ lifecycle: event.target.value }),
         },
@@ -98,7 +133,8 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function RoutePage() {
+    // ── 页面 ────────────────────────────────────────────────────────────────
+    function RoutePanel() {
       const [state, setState] = React.useState({ status: 'loading', path: '', text: '', message: null, error: null })
       const [catalog, setCatalog] = React.useState({ providers: [], error: null })
 
@@ -117,13 +153,7 @@ window.__ModuleLoader__.load({
               ? { providers: models.providers, error: null }
               : { providers: [], error: models?.error ?? `HTTP ${modelsResponse.status}` })
           }
-          setState({
-            status: 'ready',
-            path: body.path ?? '',
-            text: body.text ?? '',
-            message: body.exists ? null : '还没有 dmr.json，选一次并保存即可创建。',
-            error: null,
-          })
+          setState({ status: 'ready', path: body.path ?? '', text: body.text ?? '', message: null, error: null })
         } catch (error) {
           setState({ status: 'error', path: '', text: '', message: null, error: String(error?.message ?? error) })
         }
@@ -141,7 +171,7 @@ window.__ModuleLoader__.load({
           })
           const body = await response.json()
           if (!response.ok) throw new Error(body?.error ?? `HTTP ${response.status}`)
-          setState((prev) => ({ ...prev, path: body.path ?? prev.path, text: body.text ?? prev.text, message: '已保存，下一个子代理就用新路由。' }))
+          setState((prev) => ({ ...prev, path: body.path ?? prev.path, text: body.text ?? prev.text, message: '已保存，下一个子代理生效。' }))
         } catch (error) {
           setState((prev) => ({ ...prev, message: null, error: String(error?.message ?? error) }))
         }
@@ -149,60 +179,84 @@ window.__ModuleLoader__.load({
 
       const parsed = React.useMemo(() => parse(state.text), [state.text])
       const roles = parsed.table?.roles ?? {}
+      const canSave = state.status === 'ready' && !parsed.error
 
-      return h('div', { style: box },
-        h('div', { style: { fontSize: 14, fontWeight: 600 } }, '路由表'),
-        h('div', { style: muted },
-          '选项来自运行时真实可用的模型（不是手填的字符串）。保存后**下一个子代理**生效，不用重装。',
+      return h('section', { style: S.section },
+        h('div', { style: S.title }, '阶段路由'),
+        h('div', { style: S.desc },
+          '三个阶段的子代理各走各的模型。每次派活都会重新读这份配置，所以保存后下一个子代理就生效，不需要重装。下拉里的选项来自运行时真实可用的模型。',
           h('br'),
-          '文件：', h('code', null, state.path || '(未知)'),
+          '配置文件：', h('code', { style: S.code }, state.path || '读取中…'),
+          h('span', { style: S.note }, '默认取 DSH_HOME 环境变量，不是写死的路径'),
         ),
 
         catalog.error
-          ? h('div', { style: bad }, `模型目录读不出来：${catalog.error}（下拉不可用，仍可直接改下面的 JSON）`)
+          ? h('div', { style: S.bad }, `模型目录读不出来：${catalog.error}。下拉不可用，但可以展开下面的 JSON 直接改。`)
           : null,
 
-        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
-          ROLES.map((role) => h(RoleRow, {
+        h('div', { style: S.panel },
+          h('div', { style: S.head },
+            h('span', null, '阶段'),
+            h('span', null, '供应商'),
+            h('span', null, '模型'),
+            h('span', null, 'effort'),
+            h('span', null, '生命周期'),
+          ),
+          ROLES.map((role) => h(RoleLine, {
             key: role,
             role,
             entry: roles[role] ?? {},
             providers: catalog.providers,
-            onChange: (patch) => setState((prev) => ({ ...prev, text: withRole(prev.text || '{"roles":{}}', role, patch), message: null })),
+            onChange: (patch) => setState((prev) => ({
+              ...prev,
+              text: withRole(prev.text || '{"roles":{}}', role, patch),
+              message: null,
+              error: null,
+            })),
           })),
+          h('div', { style: S.footer },
+            h('button', { type: 'button', style: S.btnPrimary, onClick: save, disabled: !canSave }, '保存'),
+            h('button', { type: 'button', style: S.btn, onClick: load, disabled: state.status === 'loading' }, '重新读取'),
+            h('span', { style: S.spacer }),
+            state.message ? h('span', { style: S.ok }, state.message) : null,
+            state.error ? h('span', { style: S.bad }, state.error) : null,
+            parsed.error ? h('span', { style: S.bad }, `JSON 不合法：${parsed.error}`) : null,
+          ),
         ),
 
-        h('details', { style: { fontSize: 13 } },
-          h('summary', { style: { cursor: 'pointer', opacity: 0.8 } }, '直接编辑 JSON'),
+        h('details', null,
+          h('summary', { style: S.summary }, '直接编辑 JSON'),
           h('textarea', {
             value: state.text,
             spellCheck: false,
             rows: 12,
-            style: { ...mono, marginTop: 8 },
+            style: S.textarea,
             onChange: (event) => setState((prev) => ({ ...prev, text: event.target.value, message: null, error: null })),
           }),
         ),
-
-        parsed.error ? h('div', { style: bad }, `JSON 不合法：${parsed.error}`) : null,
-        state.message ? h('div', { style: okText }, state.message) : null,
-        state.error ? h('div', { style: bad }, state.error) : null,
-
-        h('div', { style: row },
-          h('button', { type: 'button', style: button, onClick: load, disabled: state.status === 'loading' }, '重新读取'),
-          h('button', { type: 'button', style: button, onClick: save, disabled: Boolean(parsed.error) }, '保存'),
-        ),
       )
+    }
+
+    /** The detail slot draws one entry on every plugin page; stay silent for other subjects. */
+    function RouteSection(props) {
+      let match = false
+      try {
+        match = JSON.stringify(props?.subject ?? null).includes('dsh-deepseek-model-route')
+      } catch {
+        match = false
+      }
+      return match ? h(RoutePanel) : null
     }
 
     return {
       inject: ['slots'],
       apply(ctx) {
-        ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
-          name: 'settings.plugins.tab',
+        ctx.slots.inject('plugins.detail.section', () => ctx.slots.register({
+          name: 'plugins.detail.section',
           id: 'dmr-route',
           order: 40,
           label: '模型路由',
-        }, RoutePage))
+        }, RouteSection))
       },
     }
   },
