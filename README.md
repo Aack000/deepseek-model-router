@@ -70,9 +70,17 @@ node usage-audit.js --cost --since 2026-11-04
 
 ## 路线图
 
-### v2：设置页
+### v2：设置页（进行中）
 
-Plugins 页里一个 JSON 编辑器 + 模型下拉。模型不许手填：用 `ctx.llm.listProviders()` + `llm.listModels(provider)` 读真实目录。结构照 `dsh-balance-mini` 的双面插件（host + `lib/client.js`）。
+Plugins 设置区里的 **DeepSeek Model Route** 页：
+
+- host 侧暴露 `GET/PUT /plugins/dsh-deepseek-model-route/config`（仅回环地址），GET 返回文件路径与原文，PUT 校验后写回
+- client 侧注册到 `settings.plugins.tab`，页面里直接编辑路由表并保存；保存后**下一个子代理**就用新路由
+- 校验在写之前：角色名必须是 `plan`/`impl`/`review`，`provider`/`model` 非空字符串，`effort` 可选字符串；不合法就返回 400 且**不落盘**
+
+> 首次安装后 client 半需要**重启 DSH**：client 模块表是启动时扫描 `dsh.client` 建的。host 侧（三个工具 + 路由接口）装完即生效。
+
+还没做：模型下拉（应从 `llm.listModels` 实时读，不让人手填）、locale 资源。
 
 ### v3：子代理生命周期
 

@@ -11,9 +11,12 @@
 // node_modules holds no `@deepseek-ai/*` packages, so a bundle that imported them
 // would fail to resolve. Everything comes from the Cordis context.
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+
+/** The settings page talks to this exact path. */
+const ROUTE_PATH = '/plugins/dsh-deepseek-model-route/config'
 
 export const name = 'dmr'
 // `inject` makes Cordis wait for both services before apply() runs, and fail the
@@ -181,6 +184,107 @@ function toolFor(ctx, role, file, provider) {
   }
 }
 
+// ─────────────────────────── settings page route ───────────────────────────
+
+function sendJson(res, status, body) {
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+  res.end(JSON.stringify(body))
+}
+
+function readBody(req, limit = 64 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0
+    const chunks = []
+    req.on('data', (chunk) => {
+      size += chunk.length
+      if (size > limit) {
+        reject(new Error('body too large'))
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    req.on('error', reject)
+  })
+}
+
+function isLocal(req) {
+  const address = req.socket?.remoteAddress ?? ''
+  return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address)
+}
+
+/**
+ * Validate a route table before writing it. The same rules the tools apply while
+ * reading, except that an empty or missing role is allowed here too: it means the
+ * child inherits, which is a decision the human is allowed to make.
+ */
+function validateRouteTable(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('the top level must be an object')
+  const roles = parsed.roles
+  if (roles !== undefined && (roles === null || typeof roles !== 'object' || Array.isArray(roles))) {
+    throw new Error('"roles" must be an object')
+  }
+  const known = ROLES.map((role) => role.id)
+  for (const [id, entry] of Object.entries(roles ?? {})) {
+    if (!known.includes(id)) throw new Error(`unknown role "${id}" (expected ${known.join(', ')})`)
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`roles.${id} must be an object`)
+    if (typeof entry.provider !== 'string' || entry.provider.length === 0) {
+      throw new Error(`roles.${id}.provider must be a non-empty string`)
+    }
+    if (typeof entry.model !== 'string' || entry.model.length === 0) {
+      throw new Error(`roles.${id}.model must be a non-empty string`)
+    }
+    if (entry.effort !== undefined && typeof entry.effort !== 'string') {
+      throw new Error(`roles.${id}.effort must be a string`)
+    }
+  }
+  return parsed
+}
+
+function configRoute(file) {
+  return async (req, res) => {
+    if (!isLocal(req)) return sendJson(res, 403, { error: 'local access only' })
+
+    if (req.method === 'GET') {
+      try {
+        return sendJson(res, 200, { path: file, exists: true, text: readFileSync(file, 'utf8') })
+      } catch (error) {
+        if (error?.code === 'ENOENT') return sendJson(res, 200, { path: file, exists: false, text: '' })
+        return sendJson(res, 500, { error: String(error?.message ?? error) })
+      }
+    }
+
+    if (req.method === 'PUT' || req.method === 'POST') {
+      let body
+      try {
+        body = await readBody(req)
+      } catch (error) {
+        return sendJson(res, 413, { error: String(error?.message ?? error) })
+      }
+      let parsed
+      try {
+        parsed = JSON.parse(body)
+      } catch (error) {
+        return sendJson(res, 400, { error: `not valid JSON: ${error?.message ?? error}` })
+      }
+      try {
+        validateRouteTable(parsed)
+      } catch (error) {
+        return sendJson(res, 400, { error: String(error?.message ?? error) })
+      }
+      try {
+        writeFileSync(file, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8')
+        return sendJson(res, 200, { path: file, exists: true, text: readFileSync(file, 'utf8') })
+      } catch (error) {
+        return sendJson(res, 500, { error: String(error?.message ?? error) })
+      }
+    }
+
+    return sendJson(res, 405, { error: 'method not allowed' })
+  }
+}
+
 export function apply(ctx, config = {}) {
   const file = routeFile(config)
   // The backend that materializes the child; `spawn` ships with the harness and is
@@ -188,5 +292,21 @@ export function apply(ctx, config = {}) {
   const provider = typeof config.provider === 'string' && config.provider.length > 0 ? config.provider : 'spawn'
   for (const role of ROLES) {
     ctx.effect(() => ctx.tools.register(toolFor(ctx, role, file, provider)), `dmr:${role.tool}`)
+  }
+
+  // The settings page reads and writes the same file the tools read, so a saved
+  // edit applies to the next delegation. A route failure must never take the
+  // session down: it only makes the page unavailable.
+  try {
+    if (typeof ctx.inject === 'function') {
+      ctx.inject(['webServer'], (httpCtx) => {
+        httpCtx.effect(
+          () => httpCtx.webServer.register({ kind: 'exact', path: ROUTE_PATH, handler: configRoute(file) }),
+          'dmr: config route',
+        )
+      })
+    }
+  } catch (error) {
+    console.warn('[dmr] config route unavailable:', error)
   }
 }
