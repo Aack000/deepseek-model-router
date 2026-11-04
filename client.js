@@ -87,6 +87,14 @@ window.__ModuleLoader__.load({
           h('option', { value: '' }, 'effort 默认'),
           (efforts.length > 0 ? efforts : ['off', 'low', 'high', 'max']).map((effort) => h('option', { key: effort, value: effort }, effort)),
         ),
+        h('select', {
+          style: { ...select, minWidth: 118 },
+          value: entry.lifecycle ?? 'continuable',
+          onChange: (event) => onChange({ lifecycle: event.target.value }),
+        },
+          h('option', { value: 'continuable' }, '可续跑'),
+          h('option', { value: 'one-shot' }, '交付即释放'),
+        ),
       )
     }
 

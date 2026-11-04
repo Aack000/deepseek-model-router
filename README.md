@@ -92,17 +92,30 @@ PUT /config 合法 → 200；坏 JSON → 400；角色名 typo → 400；磁盘�
 
 还没做：locale 资源（页面文案目前是内联中文）。
 
-### v3：子代理生命周期
+### v3：子代理生命周期（已完成）
 
 DSH 的子代理是 durable / continuable：跑完不关闭，条目写进父会话日志，一直可续。模型侧只有 `interrupt_agent`，**没有「关闭」**——这是设计（续跑能力就靠它）。parked 子代理不占 `maxActiveSubagents` 名额，所以不挡新派活。
 
-因此 DMR 不做「关闭按钮」（删不掉目录条目，做出来是假功能），而是让产生量有纪律：
+DMR 不做「关闭按钮」（删不掉目录条目，做出来是假功能），而是给每个角色一个 `lifecycle`：
 
-1. 角色固定三个，不按任务数派；
-2. `dmr.json` 给每个角色加 `lifecycle: "one-shot" | "continuable"`：one-shot 交付即 `drainChildren`，continuable 才保留续跑；
-3. 一轮收尾统一 `interrupt_agent` 兜底；
-4. 看板按「本轮」聚合；
-5. 把「本轮子代理数」当指标（`route-check` 已经在数）。
+| 值 | 含义 |
+|---|---|
+| `continuable`（默认） | 保持原生行为，`send_message` 可以续跑同一个子代理 |
+| `one-shot` | 交付后立刻 `activation.dispose()` 释放；`send_message` 仍可工作，但走**冷恢复** |
+
+```json
+{ "roles": { "impl": { "provider": "…", "model": "…", "lifecycle": "one-shot" } } }
+```
+
+建议：实现包用 `one-shot`（它本来就带 handoff，中断就新起一个）；规划、审查用 `continuable`（`/route` 会 `send_message` 回同一个 planner 改规划、回同一个 reviewer 复审）。
+
+**释放是可观测的**：`GET /plugins/dsh-deepseek-model-route/stats` 返回最近释放的子代理（child / role / 时间）。实测把 `review` 设成 `one-shot` 后派一次，14 秒内就出现在 stats 里。
+
+### v3 之后
+
+- locale 资源（页面文案目前内联中文）
+- 把「本轮子代理数」显示在页面上（`route-check` 已经在数）
+- 可选：按角色配 `agentPreset`，让审查子代理拿到只读的工具集
 
 ## 已知限制
 

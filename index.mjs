@@ -93,16 +93,19 @@ function readRoute(file, roleId) {
     throw new Error(`DMR: roles.${roleId}.model must be a non-empty string in ${file}`)
   }
   const effort = typeof entry.effort === 'string' && entry.effort.length > 0 ? entry.effort : undefined
-  return { kind: 'pinned', provider, model, effort }
+  // Absent means `continuable`: that is DSH's native behaviour, and a planner or a
+  // reviewer is often continued with send_message. Opting into `one-shot` is the
+  // only way to get a child released as soon as it delivers.
+  const lifecycle = entry.lifecycle === 'one-shot' ? 'one-shot' : 'continuable'
+  return { kind: 'pinned', provider, model, effort, lifecycle }
 }
 
 function describeRoute(route) {
   if (route.kind === 'inherited') return 'inherited from the parent session'
   return `${route.provider}/${route.model}${route.effort ? ` @${route.effort}` : ''}`
 }
-
 /** One tool definition per role; the model is decided inside execute(). */
-function toolFor(ctx, role, file, provider) {
+function toolFor(ctx, role, file, provider, released) {
   return {
     name: role.tool,
     description: role.description,
@@ -133,14 +136,18 @@ function toolFor(ctx, role, file, provider) {
         properties: {
           subagentId: { type: 'string' },
           route: { type: 'string' },
+          lifecycle: { type: 'string' },
         },
-        required: ['subagentId', 'route'],
+        required: ['subagentId', 'route', 'lifecycle'],
         additionalProperties: false,
       },
-      // The model reads this line. It names the route so a wrong table entry is
-      // visible at delegation time instead of at the next route-check.
+      // The model reads this line. It names the route and the lifecycle so a wrong
+      // table entry is visible at delegation time instead of at the next route-check.
       render: (_args, value) =>
-        [{ type: 'text', text: `started subagent ${value?.subagentId ?? '?'} (route: ${value?.route ?? '?'})` }],
+        [{
+          type: 'text',
+          text: `started subagent ${value?.subagentId ?? '?'} (route: ${value?.route ?? '?'}, ${value?.lifecycle ?? '?'})`,
+        }],
     },
     async execute(args, exec) {
       const parent = exec.agent
@@ -177,7 +184,25 @@ function toolFor(ctx, role, file, provider) {
         delivery: 'parent',
       })
 
-      return { subagentId: String(activation.childId), route: describeRoute(route) }
+      // `one-shot` releases the child as soon as it delivers, so a phase that only
+      // needs the answer leaves no resident activation behind. `continuable` — the
+      // default — keeps the native behaviour, where send_message can continue it.
+      if (route.kind === 'pinned' && route.lifecycle === 'one-shot') {
+        activation.result
+          .catch(() => undefined)
+          .then(() => activation.dispose())
+          .then(() => {
+            released.push({ child: String(activation.childId), role: role.id, at: Date.now() })
+            if (released.length > 200) released.shift()
+          })
+          .catch((error) => console.warn('[dmr] release failed:', error?.message ?? error))
+      }
+
+      return {
+        subagentId: String(activation.childId),
+        route: describeRoute(route),
+        lifecycle: route.kind === 'pinned' ? route.lifecycle : 'continuable',
+      }
     },
     // Delegation must not run in parallel with another delegation: two children
     // started in one step would race on the same files.
@@ -238,6 +263,9 @@ function validateRouteTable(parsed) {
     }
     if (entry.effort !== undefined && typeof entry.effort !== 'string') {
       throw new Error(`roles.${id}.effort must be a string`)
+    }
+    if (entry.lifecycle !== undefined && entry.lifecycle !== 'one-shot' && entry.lifecycle !== 'continuable') {
+      throw new Error(`roles.${id}.lifecycle must be "one-shot" or "continuable"`)
     }
   }
   return parsed
@@ -344,11 +372,15 @@ function configRoute(file) {
 
 export function apply(ctx, config = {}) {
   const file = routeFile(config)
+  // Health, not an archive: children this plugin released after they delivered.
+  // DMR cannot delete a child's catalog entry (DSH keeps it durable on purpose),
+  // so the only honest way to show the lifecycle working is to report releases.
+  const released = []
   // The backend that materializes the child; `spawn` ships with the harness and is
   // the one this plugin's tools were designed against.
   const provider = typeof config.provider === 'string' && config.provider.length > 0 ? config.provider : 'spawn'
   for (const role of ROLES) {
-    ctx.effect(() => ctx.tools.register(toolFor(ctx, role, file, provider)), `dmr:${role.tool}`)
+    ctx.effect(() => ctx.tools.register(toolFor(ctx, role, file, provider, released)), `dmr:${role.tool}`)
   }
 
   // The settings page reads and writes the same file the tools read, so a saved
@@ -367,6 +399,17 @@ export function apply(ctx, config = {}) {
         httpCtx.effect(
           () => httpCtx.webServer.register({ kind: 'exact', path: MODELS_PATH, handler: modelsRoute(modelCache) }),
           'dmr: models route',
+        )
+        httpCtx.effect(
+          () => httpCtx.webServer.register({
+            kind: 'exact',
+            path: '/plugins/dsh-deepseek-model-route/stats',
+            handler: async (req, res) => {
+              if (!isLocal(req)) return sendJson(res, 403, { error: 'local access only' })
+              return sendJson(res, 200, { released: released.slice(-50) })
+            },
+          }),
+          'dmr: stats route',
         )
       })
     }
