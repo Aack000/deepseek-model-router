@@ -201,7 +201,7 @@ window.__ModuleLoader__.load({
           name: 'settings.plugins.tab',
           id: 'dmr-route',
           order: 40,
-          label: 'DeepSeek Model Route',
+          label: '模型路由',
         }, RoutePage))
       },
     }

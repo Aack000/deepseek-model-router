@@ -2,7 +2,7 @@
   "name": "dsh-deepseek-model-route",
   "version": "0.1.0",
   "private": true,
-  "description": "DMR — DeepSeek Model Route: phase-split model routing for DeepSeek Harness. A host plugin that registers plan/impl/review delegation tools whose provider, model and effort are read from a JSON route table on every call, plus the tools that verify each round's real routes and price it.",
+  "description": "DMR（DeepSeek Model Route）：把「规划 / 实现 / 审查」三个阶段分别路由到不同模型。每次派活时读一次路由表，改配置即生效、无需重装；附带两个工具，能从会话日志核对每轮子代理实际跑的模型，并算出这一轮花了多少钱。",
   "keywords": [
     "dsh",
     "deepseek-harness",
