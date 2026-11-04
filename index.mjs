@@ -17,6 +17,7 @@ import { join } from 'node:path'
 
 /** The settings page talks to this exact path. */
 const ROUTE_PATH = '/plugins/dsh-deepseek-model-route/config'
+const MODELS_PATH = '/plugins/dsh-deepseek-model-route/models'
 
 export const name = 'dmr'
 // `inject` makes Cordis wait for both services before apply() runs, and fail the
@@ -242,6 +243,62 @@ function validateRouteTable(parsed) {
   return parsed
 }
 
+/**
+ * The model catalog, read from the live `llm` service so the page never offers a
+ * model the runtime cannot serve. Cached briefly: the account route refreshes its
+ * listing in the background and a settings page should not hammer it.
+ *
+ * A model whose route cannot be resolved still appears with an empty effort list;
+ * the page then leaves effort alone rather than inventing a value.
+ */
+function modelsRoute(modelCache) {
+  return async (req, res) => {
+    if (!isLocal(req)) return sendJson(res, 403, { error: 'local access only' })
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'method not allowed' })
+
+    if (modelCache.data && Date.now() - modelCache.at < 60_000) return sendJson(res, 200, modelCache.data)
+
+    const llm = modelCache.ctx?.get?.('llm') ?? modelCache.ctx?.llm
+    if (!llm) return sendJson(res, 503, { error: 'the llm service is not available in this composition' })
+
+    let providers
+    try {
+      providers = await llm.listProviders()
+    } catch (error) {
+      return sendJson(res, 502, { error: `cannot list providers: ${error?.message ?? error}` })
+    }
+
+    const out = []
+    for (const provider of providers ?? []) {
+      let models = []
+      try {
+        models = await llm.listModels(provider.id)
+      } catch {
+        models = []
+      }
+      const entries = []
+      for (const model of models ?? []) {
+        let efforts = []
+        let defaultEffort
+        try {
+          const info = await llm.resolveModelInfo(provider.id, model.id)
+          efforts = (info?.reasoning?.efforts ?? []).map((effort) => effort.id)
+          defaultEffort = info?.reasoning?.defaultEffort
+        } catch {
+          efforts = []
+        }
+        entries.push({ id: model.id, name: model.name ?? model.id, efforts, defaultEffort })
+      }
+      out.push({ id: provider.id, name: provider.name ?? provider.id, models: entries })
+    }
+
+    const data = { providers: out, readAt: Date.now() }
+    modelCache.at = Date.now()
+    modelCache.data = data
+    return sendJson(res, 200, data)
+  }
+}
+
 function configRoute(file) {
   return async (req, res) => {
     if (!isLocal(req)) return sendJson(res, 403, { error: 'local access only' })
@@ -299,14 +356,21 @@ export function apply(ctx, config = {}) {
   // session down: it only makes the page unavailable.
   try {
     if (typeof ctx.inject === 'function') {
+      // The catalog route needs the plugin's own ctx (for `llm`) and a place to
+      // cache the listing, so it captures both here rather than per request.
+      const modelCache = { at: 0, data: null, ctx }
       ctx.inject(['webServer'], (httpCtx) => {
         httpCtx.effect(
           () => httpCtx.webServer.register({ kind: 'exact', path: ROUTE_PATH, handler: configRoute(file) }),
           'dmr: config route',
         )
+        httpCtx.effect(
+          () => httpCtx.webServer.register({ kind: 'exact', path: MODELS_PATH, handler: modelsRoute(modelCache) }),
+          'dmr: models route',
+        )
       })
     }
   } catch (error) {
-    console.warn('[dmr] config route unavailable:', error)
+    console.warn('[dmr] settings routes unavailable:', error)
   }
 }
