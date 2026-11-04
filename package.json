@@ -2,7 +2,7 @@
   "name": "dsh-deepseek-model-route",
   "version": "0.1.0",
   "private": true,
-  "description": "DMR — DeepSeek Model Route: phase-split model routing for DeepSeek Harness. A preset whose delegation tools carry pinned model routes, plus the audit tools that verify and price a round.",
+  "description": "DMR — DeepSeek Model Route: phase-split model routing for DeepSeek Harness. A host plugin that registers plan/impl/review delegation tools whose provider, model and effort are read from a JSON route table on every call, plus the tools that verify each round's real routes and price it.",
   "keywords": [
     "dsh",
     "deepseek-harness",
@@ -10,6 +10,11 @@
     "subagent"
   ],
   "license": "MIT",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./package.json": "./package.json"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

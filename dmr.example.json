@@ -1,0 +1,20 @@
+{
+  "$comment": "Route table for DeepSeek Model Route. Copy to $DSH_HOME/dmr.json (usually %USERPROFILE%\\.dsh\\dmr.json) and edit. Read on every delegation, so changes apply to the next child without reinstalling the bundle. A role with no entry, or a missing file, means that child inherits the parent session's route.",
+  "roles": {
+    "plan": {
+      "provider": "deepseek-account",
+      "model": "deepseek-v4-pro",
+      "effort": "max"
+    },
+    "impl": {
+      "provider": "deepseek-account",
+      "model": "deepseek-flash",
+      "effort": "high"
+    },
+    "review": {
+      "provider": "deepseek-account",
+      "model": "deepseek-v4-pro",
+      "effort": "max"
+    }
+  }
+}
