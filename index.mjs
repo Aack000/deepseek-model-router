@@ -166,6 +166,49 @@ function toolFor(ctx, role, file, provider, released) {
           }
         : undefined
 
+      // Resolve the route before creating anything. A typo in dmr.json otherwise
+      // surfaces as a provider error during child creation, where nothing says which
+      // line of which file is wrong.
+      //
+      // Membership, not `resolveModelInfo`: the catalog is advisory for routing, so an
+      // unknown id resolves without complaint and only fails at the provider. Comparing
+      // against the advertised list is what catches a typo. An empty list means the
+      // provider has no catalog to compare with (for example no credential), so the
+      // check is skipped rather than rejecting a legitimate route.
+      if (route.kind === 'pinned') {
+        const llm = ctx.get?.('llm') ?? ctx.llm
+        if (llm && typeof llm.listModels === 'function') {
+          let available = []
+          try {
+            available = ((await llm.listModels(route.provider)) ?? []).map((model) => model.id)
+          } catch (error) {
+            throw new Error(
+              `DMR: cannot list models for provider "${route.provider}" (${error?.message ?? error}) — fix ${file}`,
+            )
+          }
+          if (available.length > 0 && !available.includes(route.model)) {
+            throw new Error(
+              `DMR: roles.${role.id}.model "${route.model}" is not offered by "${route.provider}" `
+              + `(available: ${available.join(', ')}) — fix ${file}`,
+            )
+          }
+          if (route.effort && typeof llm.resolveModelInfo === 'function') {
+            try {
+              const info = await llm.resolveModelInfo(route.provider, route.model)
+              const efforts = (info?.reasoning?.efforts ?? []).map((entry) => entry.id)
+              if (efforts.length > 0 && !efforts.includes(route.effort)) {
+                throw new Error(
+                  `DMR: roles.${role.id}.effort "${route.effort}" is not offered by ${route.provider}/${route.model} `
+                  + `(available: ${efforts.join(', ')}) — fix ${file}`,
+                )
+              }
+            } catch (error) {
+              if (!String(error?.message ?? error).startsWith('DMR:')) throw error
+            }
+          }
+        }
+      }
+
       // A fresh signal: the spec's signal cancels STARTUP. Handing it the tool
       // call's signal would tie the child's creation to a call that returns
       // immediately, and the activation is owned by the runtime from then on.
