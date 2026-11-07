@@ -58,6 +58,44 @@ const { PRICE, isPriced, usdOf } = require('./lib/pricing.js');
 
 const USAGE =
   'usage: node dsh/route-check.js [--parent <session id|prefix>] [--dir <sessions root>] [--from <ISO time|epoch>] [--expect plan=provider/model,...] [--json] [--cost]';
+/** --help / -h 的完整说明：只走 stdout + 退出码 0，正常路径不输出 */
+const HELP = `用法：
+  node route-check.js [--parent <会话 id 或前 8 位>] [--dir <sessions 根>]
+                      [--from <ISO 时间或 epoch>] [--expect plan=provider/model,...]
+                      [--json] [--cost] [--help]
+
+参数：
+  --parent <id>    父会话 id（可只给前 8 位，也接受 session- 前缀）；省略时自动挑最近修改、
+                   且日志里派过 plan_subagent / impl_subagent / review_subagent 的会话
+  --dir <路径>     会话日志根目录，默认 $DSH_HOME/sessions，没设 $DSH_HOME 时用 ~/.dsh/sessions
+  --from <时间>    只看该时间之后派出的子代理；ISO 时间，或 epoch 秒/毫秒
+  --expect <列表>  覆盖期望，逗号分隔：plan=provider/model,impl=provider/model,review=...
+                   显式给出的角色一定会被比对（优先于该次派活的声明和 dmr.json）
+                   角色键也接受 plan_subagent / impl_subagent / review_subagent，以及
+                   generic / subagent（默认不给通用工具设期望，设了就会比对）
+  --json           输出 {"parent":...,"rows":[...],"summary":{...}}；判定不符时 JSON 仍完整合法
+  --cost           附带美元：表格末尾加一列 $（该子会话合计），表下给「主会话/规划/实现/审查/
+                   合计」汇总；--json 每行加 usd、summary 加 cost
+  --help, -h       打印这份说明并退出（退出码 0）；出现在任何位置都生效
+
+它核对什么：
+  每个角色子代理实际跑的模型 vs 期望。模型取子会话日志里第一条 request/header 的
+  data.header.config.{provider,model,reasoningEffort}，不是父会话的配置推断；
+  plan_subagent → 规划，impl_subagent → 实现，review_subagent → 审查；
+  通用 subagent 默认没有期望，只列实际值、不计入对错。
+
+期望从哪来（优先级从高到低）：
+  1. 命令行 --expect 显式给出的角色；
+  2. 该次派活声明的路由——派活工具的返回文本里有「route: provider/model ...」；
+     角色继承父会话时那里写的是「inherited ...」，不是路由，会被忽略；
+  3. $DSH_HOME/dmr.json 的当前值。
+  所以改表不会误伤历史轮次，「声明了 A、实际跑了 B」照样能抓出来；三条都没有的角色
+  就不比对，只在汇总里计一行「未比对」。
+
+退出码：
+  0  全部符合（或没有找到任何子代理）
+  1  有 ✗（期望不符 / 子会话读不出），或读不到父会话（--parent 找不到、--dir 不存在）
+  2  参数错误（未知参数、缺值、非法 --from / --expect 等）`;
 const LOG_FILE = 'session.v4.jsonl.zstd';
 const SESSION_ID_PREFIX = 'session-';
 /** --cost 的 _default 说明行：价格从 PRICE._default 生成，避免手抄成第二份（措辞同 usage-audit） */
@@ -159,7 +197,7 @@ function parseFrom(value) {
 }
 
 /** 解析 --expect：逗号分隔的 role=provider/model；只覆盖显式给出的角色 */
-function parseExpect(value, expect) {
+function parseExpect(value, expect, explicit) {
   const parts = value.split(',');
   for (const part of parts) {
     const trimmed = part.trim();
@@ -174,11 +212,17 @@ function parseExpect(value, expect) {
     if (!tool) throw new RouteError(`unknown --expect role: ${key} (use plan, impl, or review)`);
     if (target === '') throw new RouteError(`empty --expect value for ${key}`);
     expect[tool] = target;
+    // 记下"用户显式要求比对"的角色：它要压过派活声明，否则 --expect 在已经声明过
+    // 路由的行上完全无效（用户以为按他给的核对过，其实没有）。
+    if (explicit) explicit.add(tool);
   }
 }
 
 function parseArgs(argv) {
-  const opts = { parent: null, dir: null, fromMs: null, expect: { ...DEFAULT_EXPECT }, json: false, cost: false };
+  // --help/-h 优先于一切参数校验：先扫整条 argv，--parent x --help 也要生效
+  if (argv.includes('--help') || argv.includes('-h')) return { help: true };
+
+  const opts = { parent: null, dir: null, fromMs: null, expect: { ...DEFAULT_EXPECT }, explicitExpect: new Set(), json: false, cost: false };
 
   for (let i = 0; i < argv.length; i += 1) {
     const raw = argv[i];
@@ -220,7 +264,7 @@ function parseArgs(argv) {
       } else if (name === '--from') {
         opts.fromMs = parseFrom(value);
       } else {
-        parseExpect(value, opts.expect);
+        parseExpect(value, opts.expect, opts.explicitExpect);
       }
       continue;
     }
@@ -412,8 +456,11 @@ function collectDispatches(events, fromMs) {
       // DMR 的派活工具会把当时生效的路由写进返回文本（`route: provider/model @effort`）。
       // 拿它当期望，比拿当前 dmr.json 准：改过表之后，历史轮次仍按当时的声明核对，
       // 而「声明了 A、实际跑了 B」这种真正的路由事故照样能抓出来。
+      //
+      // 只接受含 `/` 的值：角色继承父会话时工具写的是「inherited from the parent
+      // session」，那是说明不是路由，当成期望会把必对的继承场景报成 ✗。
       const claim = /route:\s*([^\s,)]+)/.exec(text);
-      if (claim) row.claimed = claim[1];
+      if (claim && claim[1].includes('/')) row.claimed = claim[1];
     }
   }
 
@@ -554,12 +601,14 @@ function identityMatches(provider, model, expected) {
  *   ok=true 符合；ok=false 不符（含 unreadable）；ok=null 无期望或 unknown，不计对错。
  * status: started | unknown | unreadable
  */
-function evaluate(rows, entries, parentEntry, expect, withCost = false) {
+function evaluate(rows, entries, parentEntry, expect, explicitExpect, withCost = false) {
   const siblings = entries.filter((entry) => entry.slug === parentEntry.slug);
 
   return rows.map((row) => {
-    const expected = row.claimed
-    ?? (Object.prototype.hasOwnProperty.call(expect, row.tool) ? expect[row.tool] : null);
+    const explicit = explicitExpect && explicitExpect.has(row.tool);
+    const fromTable = Object.prototype.hasOwnProperty.call(expect, row.tool) ? expect[row.tool] : null;
+    // 命令行显式给的压过声明：用户说"按这个核对"，就不该被派活自己的声明顶掉。
+    const expected = explicit ? fromTable : (row.claimed ?? fromTable);
     const base = {
       role: row.role,
       roleLabel: row.roleLabel,
@@ -841,6 +890,11 @@ function main(argv) {
     throw err;
   }
 
+  if (opts.help) {
+    process.stdout.write(`${HELP}\n`);
+    return 0;
+  }
+
   const resolved = resolveSessionsDir(opts);
 
   let stat = null;
@@ -909,7 +963,7 @@ function main(argv) {
   }
 
   const dispatches = collectDispatches(decoded.events, opts.fromMs);
-  const rows = evaluate(dispatches, entries, parentEntry, opts.expect, opts.cost);
+  const rows = evaluate(dispatches, entries, parentEntry, opts.expect, opts.explicitExpect, opts.cost);
   const summary = summarize(rows);
   const cost = opts.cost ? summarizeCost(decoded.events, rows) : null;
 
