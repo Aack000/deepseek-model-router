@@ -112,6 +112,8 @@ DMR 不做「关闭按钮」（删不掉目录条目，做出来是假功能）�
 
 **释放是可观测的**：`GET /plugins/dsh-deepseek-model-route/stats` 返回最近释放的子代理（child / role / 时间）。实测把 `review` 设成 `one-shot` 后派一次，14 秒内就出现在 stats 里。
 
+**释放不等于不能用**：实测对一个已释放的 `one-shot` 子代理发 `send_message`，冷恢复成功并正常回复；它按**当时记录的** provider/model/effort（flash @high）发请求，不是按当前 `dmr.json` 走——所以之后改表不会让一个已存在的子代理换模型。
+
 ### v3 之后
 
 - locale 资源（页面文案目前内联中文）
