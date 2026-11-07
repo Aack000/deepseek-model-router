@@ -1,19 +1,20 @@
 {
-  "$comment": "Route table for DeepSeek Model Route. Copy to $DSH_HOME/dmr.json (usually %USERPROFILE%\\.dsh\\dmr.json) and edit. Read on every delegation, so changes apply to the next child without reinstalling the bundle. A role with no entry, or a missing file, means that child inherits the parent session's route.",
+  "$comment": "DMR 路由表。复制到 $DSH_HOME/dmr.json（通常是 %USERPROFILE%\\.dsh\\dmr.json）后编辑。每次派活都会重新读这份文件，所以改完下一个子代理就生效，不用重装插件。某个角色没有条目、或整个文件不存在，则该角色的子代理继承父会话的路由。下面的取值只是示例：想要更强的规划/审查，把这两行的 model 换成该供应商提供的更强模型即可。",
   "roles": {
     "plan": {
       "provider": "deepseek-account",
-      "model": "deepseek-v4-pro",
+      "model": "deepseek-flash",
       "effort": "max"
     },
     "impl": {
       "provider": "deepseek-account",
       "model": "deepseek-flash",
-      "effort": "high"
+      "effort": "high",
+      "lifecycle": "one-shot"
     },
     "review": {
       "provider": "deepseek-account",
-      "model": "deepseek-v4-pro",
+      "model": "deepseek-flash",
       "effort": "max"
     }
   }
