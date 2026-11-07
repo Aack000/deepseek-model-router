@@ -125,3 +125,25 @@ DMR 不做「关闭按钮」（删不掉目录条目，做出来是假功能）�
 - **`subagent_fork` 不参与**：fork 子代理继承父会话路由以复用 KV cache，钉模型没有意义。
 - **`route-check` 的自动选父会话**只认三个角色工具；只有通用 `subagent` 的会话要用 `--parent` 指定。
 - **工具不是线程安全的**：`isConcurrencySafe` 返回 false，同一时刻只跑一个派活，避免两个包同时改同一批文件。
+
+## 运维注意
+
+**应用升级或 profile 重装之后，先确认插件还在。** 实测踩到过一次：`profiles/desktop/package.json` 里仍然声明着 `dsh-deepseek-model-route`，但 `profiles/desktop/node_modules/` 下的链接已经消失——插件没被加载，三个工具和详情页里的面板**同时消失**，而包清单看起来一切正常。
+
+自查（任一）：
+
+```powershell
+# 依赖链接还在吗
+Test-Path "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-deepseek-model-route"
+# 插件路由还有响应吗（端口用当时的 GUI 端口）
+Invoke-WebRequest "http://127.0.0.1:<port>/plugins/dsh-deepseek-model-route/config" -UseBasicParsing
+```
+
+恢复只要重装一次（先卸再装，`install_bundle` 对已装的包会直接拒绝）：
+
+```
+plugin_manager remove_bundle  dsh-deepseek-model-route
+plugin_manager install_bundle E:\code\program\deepseek-model-router
+```
+
+重装后工具立刻可用；**设置页里的面板要重启 DSH** 才会回来（client 模块在启动时扫描）。
