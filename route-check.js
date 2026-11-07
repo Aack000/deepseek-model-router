@@ -28,7 +28,7 @@
  * 输出约定：
  *   - 每个被派出的子代理一行；同一工具调多次就有多行，按派发顺序。
  *   - plan_subagent → 规划，impl_subagent → 实现，review_subagent → 审查；
- *     subagent（通用）没有期望，只列实际值，不计入对错。
+ *     subagent（通用）默认没有期望，只列实际值；--expect 显式给出时才比对。
  *   - 期望不符 → 行尾 ✗，末行 "N/M 不符"，退出码 1。
  *   - 找不到任何子代理 → 一行 "no subagents found under this parent"，退出码 0。
  *   - tool/call 没有配到 tool/result（子代理没起来 / 结果被截断）→ 模型列 unknown，
@@ -70,7 +70,7 @@ const HELP = `用法：
   --dir <路径>     会话日志根目录，默认 $DSH_HOME/sessions，没设 $DSH_HOME 时用 ~/.dsh/sessions
   --from <时间>    只看该时间之后派出的子代理；ISO 时间，或 epoch 秒/毫秒
   --expect <列表>  覆盖期望，逗号分隔：plan=provider/model,impl=provider/model,review=...
-                   显式给出的角色一定会被比对（优先于该次派活的声明和 dmr.json）
+                   显式给出的角色会被比对（优先于该次派活的声明和 dmr.json；解析不到子代理的行仍不比对）
                    角色键也接受 plan_subagent / impl_subagent / review_subagent，以及
                    generic / subagent（默认不给通用工具设期望，设了就会比对）
   --json           输出 {"parent":...,"rows":[...],"summary":{...}}；判定不符时 JSON 仍完整合法
@@ -89,7 +89,7 @@ const HELP = `用法：
   2. 该次派活声明的路由——派活工具的返回文本里有「route: provider/model ...」；
      角色继承父会话时那里写的是「inherited ...」，不是路由，会被忽略；
   3. $DSH_HOME/dmr.json 的当前值。
-  所以改表不会误伤历史轮次，「声明了 A、实际跑了 B」照样能抓出来；三条都没有的角色
+  继承父会话的行不比对（那一轮没有固定路由可核）。所以改表不会误伤历史轮次，「声明了 A、实际跑了 B」照样能抓出来；三条都没有的角色
   就不比对，只在汇总里计一行「未比对」。
 
 退出码：
@@ -102,7 +102,7 @@ const SESSION_ID_PREFIX = 'session-';
 const COST_DEFAULT_NOTE = `* 单价表里没有，按默认价 ${PRICE._default.map((value) => `$${value}`).join('/')} 估`;
 /** 递归找日志的深度上限：sessions/<slug>/<session>/file 只要 2 层，留点余量 */
 const MAX_WALK_DEPTH = 4;
-/** 参与核对的工具；generic 的 subagent 没有期望，只列实际值 */
+/** 参与核对的工具；generic 的 subagent 默认没有期望（--expect 给出时才比对） */
 const ROLE_TOOLS = {
   plan_subagent: { role: 'plan', label: '规划' },
   impl_subagent: { role: 'impl', label: '实现' },
@@ -209,7 +209,7 @@ function parseExpect(value, expect, explicit) {
     const key = trimmed.slice(0, eq).trim();
     const target = trimmed.slice(eq + 1).trim();
     const tool = EXPECT_KEYS[key];
-    if (!tool) throw new RouteError(`unknown --expect role: ${key} (use plan, impl, or review)`);
+    if (!tool) throw new RouteError(`unknown --expect role: ${key} (use plan, impl, review, generic or subagent)`);
     if (target === '') throw new RouteError(`empty --expect value for ${key}`);
     expect[tool] = target;
     // 记下"用户显式要求比对"的角色：它要压过派活声明，否则 --expect 在已经声明过
@@ -457,10 +457,15 @@ function collectDispatches(events, fromMs) {
       // 拿它当期望，比拿当前 dmr.json 准：改过表之后，历史轮次仍按当时的声明核对，
       // 而「声明了 A、实际跑了 B」这种真正的路由事故照样能抓出来。
       //
-      // 只接受含 `/` 的值：角色继承父会话时工具写的是「inherited from the parent
-      // session」，那是说明不是路由，当成期望会把必对的继承场景报成 ✗。
+      // 只有一种值不算路由：角色继承父会话时工具写「inherited from the parent session」。
+      // 那行**根本不比对**（不退回 dmr.json）——否则事后把该角色补进表、模型又不同，
+      // 历史继承行会被拿新表核对，凭空 ✗。其余 `route:` 值照收：判据是语义而不是
+      // 「含不含斜杠」，免得哪天声明格式变了（比如只写 model）就静默丢掉。
       const claim = /route:\s*([^\s,)]+)/.exec(text);
-      if (claim && claim[1].includes('/')) row.claimed = claim[1];
+      if (claim) {
+        if (/^inherited/i.test(claim[1])) row.inherited = true;
+        else row.claimed = claim[1];
+      }
     }
   }
 
@@ -608,7 +613,8 @@ function evaluate(rows, entries, parentEntry, expect, explicitExpect, withCost =
     const explicit = explicitExpect && explicitExpect.has(row.tool);
     const fromTable = Object.prototype.hasOwnProperty.call(expect, row.tool) ? expect[row.tool] : null;
     // 命令行显式给的压过声明：用户说"按这个核对"，就不该被派活自己的声明顶掉。
-    const expected = explicit ? fromTable : (row.claimed ?? fromTable);
+    // 继承父路由的行不比对（除非用户显式给了期望）——那一轮本就没有固定路由可言。
+    const expected = explicit ? fromTable : (row.inherited ? null : (row.claimed ?? fromTable));
     const base = {
       role: row.role,
       roleLabel: row.roleLabel,
@@ -829,10 +835,10 @@ function printTable(parentId, rows, summary, cost = null) {
     lines.push(row.map((value, index) => padCell(value, widths[index])).join('  ').trimEnd());
   }
   lines.push(`${summary.mismatched}/${summary.total} 不符`);
-  if (summary.mismatched > 0) lines.push('（期望取自该次派活的声明路由；没有声明时回退到当前 dmr.json）');
+  if (summary.mismatched > 0) lines.push('（期望优先级：--expect 显式值 > 该次派活的声明路由 > 当前 dmr.json；继承父路由的行不比对）');
   if (summary.unknown > 0) lines.push(`unknown: ${summary.unknown}`);
   if (summary.unchecked > 0) {
-    lines.push(`${summary.unchecked} 行未比对（dmr.json 里没有对应角色的路由，或两者都没有期望）`);
+    lines.push(`${summary.unchecked} 行未比对（没有 --expect、没有声明路由、dmr.json 也没有该角色，或它继承自父会话）`);
   }
   if (cost !== null) {
     lines.push(costLine(cost));
