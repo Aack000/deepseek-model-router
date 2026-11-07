@@ -182,6 +182,31 @@ window.__ModuleLoader__.load({
       const roles = parsed.table?.roles ?? {}
       const canSave = state.status === 'ready' && !parsed.error
 
+      // 配置里的模型是否真的可用。派活时也会拦（index.mjs 的预检），但在这里提前
+      // 标出来，省得等到那一轮跑到一半才发现表里写了个不存在的 id。
+      const problems = []
+      if (catalog.providers.length > 0) {
+        for (const role of ROLES) {
+          const entry = roles[role] ?? {}
+          if (!entry.provider || !entry.model) continue
+          const provider = catalog.providers.find((item) => item.id === entry.provider)
+          if (!provider) {
+            problems.push(`${ROLE_LABEL[role]}：供应商 "${entry.provider}" 不在当前可用列表里`)
+            continue
+          }
+          const ids = (provider.models ?? []).map((item) => item.id)
+          if (ids.length > 0 && !ids.includes(entry.model)) {
+            problems.push(`${ROLE_LABEL[role]}：模型 "${entry.model}" 不在 ${provider.id} 的可用列表里（可用：${ids.join('、')}）`)
+            continue
+          }
+          const model = (provider.models ?? []).find((item) => item.id === entry.model)
+          const efforts = (model?.efforts ?? [])
+          if (entry.effort && efforts.length > 0 && !efforts.includes(entry.effort)) {
+            problems.push(`${ROLE_LABEL[role]}：effort "${entry.effort}" 不在 ${entry.model} 支持的档位里（可用：${efforts.join('、')}）`)
+          }
+        }
+      }
+
       return h('section', { style: S.section },
         h('div', { style: S.title }, '阶段路由'),
         h('div', { style: S.desc },
@@ -223,6 +248,12 @@ window.__ModuleLoader__.load({
             parsed.error ? h('span', { style: S.bad }, `JSON 不合法：${parsed.error}`) : null,
           ),
         ),
+
+        problems.length > 0
+          ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+              problems.map((text) => h('div', { key: text, style: S.bad }, `配置有问题：${text}`)),
+            )
+          : null,
 
         h('details', null,
           h('summary', { style: S.summary }, '直接编辑 JSON'),
