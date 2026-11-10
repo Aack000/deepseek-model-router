@@ -13,6 +13,7 @@
 | `cordis.patch.yml` | 一行 host 平面插件行（**没有 preset**，见下） |
 | `dmr.example.json` | 路由表示例，复制成 `$DSH_HOME/dmr.json` 后编辑 |
 | `route-check.js` | 角色归属 + 模型核对 + 每轮花费（`--cost`）。期望值取自**该次派活的声明路由**（工具把当时生效的路由写进返回文本），没有声明才回退到当前 `dmr.json`——改表不会误伤历史轮次，「声明 A 实际跑 B」照样抓得出 |
+| `doctor.js` | 一次回答「现在哪一环坏了」：安装链（包目录 / 两个入口 / 插件行 / 依赖 / bundle / node_modules 链接 / 是否被禁用）、`dmr.json` 与实时目录、会话日志、四个接口、以及运行中的进程是否比磁盘上的代码旧 |
 | `usage-audit.js` | token 汇总 + 美元计价 |
 | `lib/session-log.js` | 多帧 zstd 结构解析（RFC 8878 帧头 + 块头，精确帧边界与截断判定） |
 | `lib/pricing.js` | 价表（$/百万 token）与分时计价 |
@@ -50,14 +51,16 @@
 copy dmr.example.json $env:USERPROFILE\.dsh\dmr.json
 ```
 
-然后在任意会话里用三个工具派活；核对用：
+然后在任意会话里用三个工具派活；核对与自检用：
 
 ```powershell
+node doctor.js                           # 安装链 / 配置 / 日志 / 四个接口，一次查完
 node route-check.js                      # 自动找最近派过角色工具的父会话
 node route-check.js --parent <id8> --cost
 node usage-audit.js --cost --since 2026-11-04
 ```
 
+`doctor` 退出码：没有 ✗ → 0，有 ✗ → 1，参数错误 → 2；`!` 只是提醒，不影响退出码。端口默认从本机监听端口里**按 `/config` 的响应形状**认出来（GUI 端口每次重启都变），也可以用 `--port` 直接指定。
 `route-check` 退出码：全部符合 → 0，有 ✗ → 1。`usage-audit`：正常 0 / 目录不存在 1 / 参数错误 2。
 
 一次实测（同一会话、standard preset、未建 preset）：
@@ -133,6 +136,31 @@ DMR 不做「关闭按钮」（删不掉目录条目，做出来是假功能）�
 
 实测（2026-11-10）：`85e683b0` → `$0.0221` / 26 次调用、`d93b29e5` → `$0.0809` / 40 次，与 `route-check --cost` 逐位一致；坏行跳过、`childId` 找不到的记 `missing`、非回环地址 403、非 GET 405。
 
+### 自检：`doctor.js`（已完成）
+
+一次回答「现在哪一环坏了」，不按清单推断，只读盘或直接问接口：
+
+| 段 | 查什么 |
+|---|---|
+| 环境 | `DSH_HOME` 在不在、能不能读 |
+| 安装 | 包目录、`main` 与 `exports["./client"]` 指向的文件、bundle patch 里那行 `id: dmr-delegation`、profile 的 `dependencies` 与 `dsh.profile.bundles`、`node_modules` 链接**指向何处**、profile 的 `cordis.patch.yml` / `cordis.yml` 有没有把它 `disabled: true`、还有没有别的断链 |
+| 配置 | `dmr.json` 是否存在·合法（与面板共用 `lib/route-table.js` 的校验），每个角色的 provider/model/effort 是否在**实时目录**里；顺手报「最近委派」日志的行数 |
+| 会话日志 | `sessions/` 可读吗、多少条日志、最近一条的时间、头 4 字节是不是 zstd 魔数 |
+| 接口 | 端口（默认扫本机监听端口，按 `/config` 的响应形状认，不只看状态码）、四个接口的状态与耗时、`/config` 与 `/rounds` 读的文件是否和 `--home` 一致、磁盘上的 `index.mjs` / `client.js` 是否比运行中的进程更新 |
+
+```
+DMR doctor · home C:\Users\yx\.dsh · profile desktop · 端口 7523
+
+检查                 状态  说明
+-------------------  ----  --------------------------------------------------
+profile desktop      ✓     C:\Users\yx\.dsh\profiles\desktop
+  node_modules 链接  ✓     → E:\code\program\deepseek-model-router
+  plan               ✓     deepseek-account/deepseek-flash @max（DeepSeek-V4.1-Flash） · continuable
+  /rounds            ✓     200 · 14ms · 回报 5 次委派
+```
+
+只读，不改任何文件；`!` 只是提醒（例如 effort 因目录为空而无法核对），不影响退出码。
+
 ## 已知限制
 
 - **法定节假日**：DeepSeek 官方节假日全天算非高峰，这里只按周一至周五 UTC 01–04 / 06–10 为高峰算，节假日会多估。
@@ -140,18 +168,16 @@ DMR 不做「关闭按钮」（删不掉目录条目，做出来是假功能）�
 - **`subagent_fork` 不参与**：fork 子代理继承父会话路由以复用 KV cache，钉模型没有意义。
 - **`route-check` 的自动选父会话**只认三个角色工具；只有通用 `subagent` 的会话要用 `--parent` 指定。
 - **工具不是线程安全的**：`isConcurrencySafe` 返回 false，同一时刻只跑一个派活，避免两个包同时改同一批文件。
+- **`doctor` 的端口发现**是扫本机 LISTENING 端口再按响应形状认；同一台机器上跑多个 DSH 实例时优先选「读的正是 `--home` 那份 `dmr.json`」的那个，都读同一份时按端口号取小的。非 Windows 上进程启动时间靠 `ps -o etimes=`，拿不到就跳过那一行。
 
 ## 运维注意
 
-**应用升级或 profile 重装之后，先确认插件还在。** 实测踩到过一次：`profiles/desktop/package.json` 里仍然声明着 `dsh-deepseek-model-route`，但 `profiles/desktop/node_modules/` 下的链接已经消失——插件没被加载，三个工具和详情页里的面板**同时消失**，而包清单看起来一切正常。
-
-自查（任一）：
+**应用升级或 profile 重装之后，先跑一次 `node doctor.js`。** 实测踩到过一次：`profiles/desktop/package.json` 里仍然声明着 `dsh-deepseek-model-route`，但 `profiles/desktop/node_modules/` 下的链接已经消失——插件没被加载，三个工具和详情页里的面板**同时消失**，而包清单看起来一切正常。doctor 对这一条会直接报 ✗ 并给出重装命令。
 
 ```powershell
-# 依赖链接还在吗
-Test-Path "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-deepseek-model-route"
-# 插件路由还有响应吗（端口用当时的 GUI 端口）
-Invoke-WebRequest "http://127.0.0.1:<port>/plugins/dsh-deepseek-model-route/config" -UseBasicParsing
+node doctor.js                 # 退出码 0 = 没有 ✗
+node doctor.js --json          # 机器可读：{"sections":[…],"summary":{…}}
+node doctor.js --port 7523     # 端口已知时跳过扫描
 ```
 
 恢复只要重装一次（先卸再装，`install_bundle` 对已装的包会直接拒绝）：
@@ -161,4 +187,4 @@ plugin_manager remove_bundle  dsh-deepseek-model-route
 plugin_manager install_bundle E:\code\program\deepseek-model-router
 ```
 
-重装后工具立刻可用；**设置页里的面板要重启 DSH** 才会回来（client 模块在启动时扫描）。
+重装后工具立刻可用；**设置页里的面板要重启 DSH** 才会回来（client 模块在启动时扫描）。doctor 的「运行中的代码」那一行会用进程启动时间和文件 mtime 比对，晚于进程启动就会提醒你重启。
