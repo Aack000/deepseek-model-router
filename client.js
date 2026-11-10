@@ -307,11 +307,7 @@ window.__ModuleLoader__.load({
 
       return h('section', { style: S.section },
         h('div', { style: S.title }, '阶段路由'),
-        h('div', { style: S.desc },
-          '三个阶段的子代理各走各的模型。每次派活都会重新读这份配置，所以保存后下一个子代理就生效，不需要重装。下拉里的选项来自运行时真实可用的模型。',
-          h('br'),
-          '配置文件：', h('code', { style: S.code }, state.path || '读取中…'),
-        ),
+        h('div', { style: S.desc }, '三个阶段的子代理各走各的模型，保存后下一个子代理生效。'),
 
         catalog.error
           ? h('div', { style: S.bad }, `模型目录读不出来：${catalog.error}。下拉不可用，但可以展开下面的 JSON 直接改。`)
@@ -356,7 +352,6 @@ window.__ModuleLoader__.load({
         // 最近委派：实际跑的模型和花费，全部来自子会话自己的日志。
         h('div', { style: S.subHead },
           h('span', { style: S.subTitle }, '最近委派'),
-          h('span', { style: S.subNote }, '实际模型与花费，取自子会话日志，跟 route-check --cost 同一套算法。'),
         ),
         rounds.error
           ? h('div', { style: S.bad }, `最近委派读不出来：${rounds.error}`)
@@ -373,20 +368,20 @@ window.__ModuleLoader__.load({
             ? h('div', { style: { display: 'flex', padding: '10px 14px' } },
                 h('span', { style: S.dim }, rounds.status === 'loading'
                   ? '读取中…'
-                  : '还没有记录。从装上这一版起，每派一次活记一行；更早的委派用 node route-check.js --cost 查。'),
+                  : '还没有记录，派一次活之后就有了。'),
               )
             : rounds.rows.map((row, index) => h(RoundRow, { key: `${row.childId ?? 'row'}-${index}`, row })),
           rounds.rows.length > 0
             ? h('div', { style: S.footer },
                 h('span', { style: S.dim }, `这 ${rounds.rows.length} 次合计 ${moneyOf(spent)}`),
                 h('span', { style: S.spacer }),
-                h('span', { style: S.note }, '一个子代理一个会话，这里是它整段会话的合计；可续跑的后续再续跑也算在同一个会话里。'),
+                h('span', { style: S.note }, '一个子代理一个会话，这里是它整段会话的合计'),
               )
             : null,
         ),
 
         h('details', null,
-          h('summary', { style: S.summary }, '直接编辑 JSON'),
+          h('summary', { style: S.summary, title: state.path || '' }, '直接编辑 JSON'),
           h('textarea', {
             value: state.text,
             spellCheck: false,
