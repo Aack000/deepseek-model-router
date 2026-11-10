@@ -15,6 +15,8 @@ import { readFileSync, writeFileSync, appendFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import costLib from './lib/cost.js'
+// 校验规则与 `doctor.js` 共用：面板说「角色名写错」和命令行说「角色名写错」要是同一句话。
+import routeTable from './lib/route-table.js'
 
 /** The settings page talks to this exact path. */
 const ROUTE_PATH = '/plugins/dsh-deepseek-model-route/config'
@@ -405,36 +407,8 @@ function isLocal(req) {
   return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address)
 }
 
-/**
- * Validate a route table before writing it. The same rules the tools apply while
- * reading, except that an empty or missing role is allowed here too: it means the
- * child inherits, which is a decision the human is allowed to make.
- */
-function validateRouteTable(parsed) {
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('the top level must be an object')
-  const roles = parsed.roles
-  if (roles !== undefined && (roles === null || typeof roles !== 'object' || Array.isArray(roles))) {
-    throw new Error('"roles" must be an object')
-  }
-  const known = ROLES.map((role) => role.id)
-  for (const [id, entry] of Object.entries(roles ?? {})) {
-    if (!known.includes(id)) throw new Error(`unknown role "${id}" (expected ${known.join(', ')})`)
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`roles.${id} must be an object`)
-    if (typeof entry.provider !== 'string' || entry.provider.length === 0) {
-      throw new Error(`roles.${id}.provider must be a non-empty string`)
-    }
-    if (typeof entry.model !== 'string' || entry.model.length === 0) {
-      throw new Error(`roles.${id}.model must be a non-empty string`)
-    }
-    if (entry.effort !== undefined && typeof entry.effort !== 'string') {
-      throw new Error(`roles.${id}.effort must be a string`)
-    }
-    if (entry.lifecycle !== undefined && entry.lifecycle !== 'one-shot' && entry.lifecycle !== 'continuable') {
-      throw new Error(`roles.${id}.lifecycle must be "one-shot" or "continuable"`)
-    }
-  }
-  return parsed
-}
+// Validation lives in lib/route-table.js: `doctor.js` checks the same file and must
+// report a bad entry the same way this route rejects it.
 
 /**
  * The model catalog, read from the live `llm` service so the page never offers a
@@ -519,7 +493,7 @@ function configRoute(file) {
         return sendJson(res, 400, { error: `not valid JSON: ${error?.message ?? error}` })
       }
       try {
-        validateRouteTable(parsed)
+        routeTable.validateRouteTable(parsed)
       } catch (error) {
         return sendJson(res, 400, { error: String(error?.message ?? error) })
       }
