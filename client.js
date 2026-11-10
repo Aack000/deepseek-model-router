@@ -373,7 +373,7 @@ window.__ModuleLoader__.load({
             ? h('div', { style: { display: 'flex', padding: '10px 14px' } },
                 h('span', { style: S.dim }, rounds.status === 'loading'
                   ? '读取中…'
-                  : '还没有记录。派一次活之后，这里会显示它实际跑的模型和花了多少。'),
+                  : '还没有记录。从装上这一版起，每派一次活记一行；更早的委派用 node route-check.js --cost 查。'),
               )
             : rounds.rows.map((row, index) => h(RoundRow, { key: `${row.childId ?? 'row'}-${index}`, row })),
           rounds.rows.length > 0
