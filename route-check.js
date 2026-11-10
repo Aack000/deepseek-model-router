@@ -54,7 +54,9 @@ const os = require('node:os');
 const process = require('node:process');
 
 const { readSessionFile } = require('./lib/session-log.js');
-const { PRICE, isPriced, usdOf } = require('./lib/pricing.js');
+const { PRICE } = require('./lib/pricing.js');
+// 计价累计器放在 lib/ 里：设置页的「最近委派」用同一份实现，两边不会算出不同的数。
+const { toCount, newCostState, costAdd, costOfEvents } = require('./lib/cost.js');
 
 const USAGE =
   'usage: node dsh/route-check.js [--parent <session id|prefix>] [--dir <sessions root>] [--from <ISO time|epoch>] [--expect plan=provider/model,...] [--json] [--cost]';
@@ -528,64 +530,11 @@ function summarizeChild(entry, withCost = false) {
   };
 }
 
-function toCount(value) {
-  const n = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(n) && n > 0 ? n : 0;
-}
-
 /**
- * --cost 的累计状态。costAdd 逐事件累计，口径与 usage-audit.js **完全一致**：
- *   - 模型取 data.message.source.model，缺失退回**最近一次** request/header 的模型；
- *   - 时间用该消息自己的 event.time（同一次会话跨高峰/非高峰时逐条变价）；
- *   - usage 缺失或四项 token 全 0 的消息不计量，也不因此标 unpriced；
- *   - 查不到单价 → usdOf 落 PRICE._default，同时 unpriced=true（输出里标 *）。
- * 父会话和子会话都走这一份实现，避免两条计价路径算出不同结果。
+ * --cost 的累计状态在 lib/cost.js：口径与 usage-audit.js 一致（模型取
+ * message.source.model、时间用消息自己的 event.time、查不到价落默认价并标 *）。
+ * 父会话和子会话都走这一份实现。
  */
-function newCostState() {
-  return { headerModel: null, usd: 0, unpriced: false };
-}
-
-function costAdd(state, event) {
-  if (!event || typeof event !== 'object') return;
-
-  if (event.type === 'request/header') {
-    const config = event.data && event.data.header && event.data.header.config;
-    const model = config && config.model;
-    if (typeof model === 'string' && model.trim() !== '') state.headerModel = model.trim();
-    return;
-  }
-
-  if (event.type !== 'assistant/message') return;
-  const usage = event.data && event.data.usage;
-  if (!usage || typeof usage !== 'object') return;
-
-  const input = toCount(usage.inputTokens);
-  const output = toCount(usage.outputTokens);
-  const cacheRead = toCount(usage.cacheReadTokens);
-  const cacheWrite = toCount(usage.cacheWriteTokens);
-  if (input + output + cacheRead + cacheWrite <= 0) return;
-
-  const source = event.data.message && event.data.message.source;
-  const model = source && typeof source.model === 'string' && source.model.trim() !== ''
-    ? source.model.trim()
-    : state.headerModel;
-  if (!isPriced(model)) state.unpriced = true;
-  state.usd += usdOf({
-    model,
-    i: input,
-    o: output,
-    cr: cacheRead,
-    cw: cacheWrite,
-    t: event.time,
-  });
-}
-
-/** 一次事件遍历算完一个会话的美元合计（父会话用；子会话在 summarizeChild 的同一遍里算） */
-function costOfEvents(events) {
-  const state = newCostState();
-  for (const event of events) costAdd(state, event);
-  return state;
-}
 
 /**
  * 期望 "provider/model" 与日志里的 config.{provider,model} 比对：

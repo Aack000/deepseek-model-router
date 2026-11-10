@@ -6,12 +6,14 @@ window.__ModuleLoader__.load({
 
     const CONFIG = '/plugins/dsh-deepseek-model-route/config'
     const MODELS = '/plugins/dsh-deepseek-model-route/models'
+    const ROUNDS = '/plugins/dsh-deepseek-model-route/rounds'
     const ROLES = ['plan', 'impl', 'review']
     const ROLE_LABEL = { plan: '规划', impl: '实现', review: '审查' }
     const ROLE_HINT = { plan: '读代码出方案', impl: '改文件的主力', review: '只读、找缺陷' }
 
     // ── 视觉 ────────────────────────────────────────────────────────────────
     const GRID = '96px minmax(150px,1fr) minmax(190px,1.3fr) 96px 128px'
+    const ROUND_GRID = '64px minmax(150px,1fr) 84px minmax(150px,1.1fr) 52px'
     const S = {
       section: {
         marginTop: 28, paddingTop: 20, borderTop: '1px solid rgba(127,127,127,.22)',
@@ -60,6 +62,20 @@ window.__ModuleLoader__.load({
         color: 'inherit', resize: 'vertical', tabSize: 2, marginTop: 8,
       },
       summary: { fontSize: 12, cursor: 'pointer', opacity: 0.7, userSelect: 'none' },
+      // 最近委派
+      subHead: { display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 4 },
+      subTitle: { fontSize: 13.5, fontWeight: 600 },
+      subNote: { fontSize: 11.5, opacity: 0.55 },
+      roundsHead: {
+        display: 'grid', gridTemplateColumns: ROUND_GRID, gap: 10, padding: '7px 14px',
+        fontSize: 11.5, opacity: 0.6, borderBottom: '1px solid rgba(127,127,127,.18)',
+      },
+      roundsRow: {
+        display: 'grid', gridTemplateColumns: ROUND_GRID, gap: 10, padding: '9px 14px',
+        borderBottom: '1px solid rgba(127,127,127,.1)', alignItems: 'center',
+      },
+      num: { fontVariantNumeric: 'tabular-nums', fontSize: 12.5 },
+      dim: { fontSize: 11.5, opacity: 0.6 },
     }
 
     // ── 数据 ────────────────────────────────────────────────────────────────
@@ -71,6 +87,29 @@ window.__ModuleLoader__.load({
       } catch (error) {
         return { error: String(error?.message ?? error) }
       }
+    }
+
+    // ── 数字格式 ────────────────────────────────────────────────────────────
+    function moneyOf(usd) {
+      if (typeof usd !== 'number' || !Number.isFinite(usd)) return '—'
+      if (usd === 0) return '$0'
+      // 单次委派常常只有几厘钱：小数位给足，不然整列都是 $0.00。
+      return usd >= 1 ? `$${usd.toFixed(2)}` : `$${usd.toFixed(4)}`
+    }
+
+    function shortTokens(value) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '0'
+      if (value < 1000) return String(Math.round(value))
+      if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}k`
+      return `${(value / 1_000_000).toFixed(1)}m`
+    }
+
+    function clockOf(ms) {
+      if (typeof ms !== 'number' || !Number.isFinite(ms)) return '—'
+      const at = new Date(ms)
+      const pad = (value) => String(value).padStart(2, '0')
+      if (at.toDateString() === new Date().toDateString()) return `${pad(at.getHours())}:${pad(at.getMinutes())}`
+      return `${at.getMonth() + 1}/${at.getDate()}`
     }
 
     function withRole(text, role, patch) {
@@ -134,17 +173,65 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** 一行委派记录：实际跑的模型、花了多少、多大上下文。 */
+    function RoundRow({ row }) {
+      const cost = row.cost ?? { status: 'missing' }
+      const actual = cost.actual ?? null
+      const declared = row.model
+        ? `${row.provider ? `${row.provider}/` : ''}${row.model}${row.effort ? ` @${row.effort}` : ''}`
+        : null
+      const model = actual?.model ?? row.model
+      const effort = actual?.effort ?? row.effort
+      // 声明和实际不一致，正是 route-check 要抓的那件事：标红，别让它看起来正常。
+      // 只在两边都写了同一项时才比，缺的那一侧不算「不一致」。
+      const mismatch = Boolean(
+        (row.model && actual?.model && row.model !== actual.model)
+        || (row.provider && actual?.provider && row.provider !== actual.provider),
+      )
+      const route = model ? `${model}${effort ? ` @${effort}` : ''}` : '继承父会话'
+      const title = actual?.model
+        ? `实际 ${actual.provider ?? '?'}/${actual.model}${actual.effort ? ` @${actual.effort}` : ''}${declared ? ` · 声明 ${declared}` : ''}`
+        : declared
+          ? `声明 ${declared}（子会话日志里还没有模型）`
+          : '继承父会话'
+      let costText
+      let tokenText
+      if (cost.status === 'ok') {
+        costText = `${moneyOf(cost.usd)}${cost.unpriced ? '*' : ''}`
+        tokenText = `${cost.calls ?? 0} 次 · 入 ${shortTokens(cost.input)} / 出 ${shortTokens(cost.output)}`
+      } else if (cost.status === 'too-large') {
+        costText = '日志过大'
+        tokenText = `${Math.round((cost.bytes ?? 0) / 1024 / 1024)} MB，未计价`
+      } else if (cost.status === 'unreadable') {
+        costText = '读不出'
+        tokenText = '子会话日志坏了'
+      } else {
+        costText = '—'
+        tokenText = '日志还没生成'
+      }
+      return h('div', { style: S.roundsRow },
+        h('span', { style: S.roleName }, ROLE_LABEL[row.role] ?? row.role ?? '未知'),
+        h('span', { style: mismatch ? { ...S.num, color: '#d9534f' } : S.num, title }, route),
+        h('span', { style: S.num }, costText),
+        h('span', { style: S.dim }, tokenText),
+        h('span', { style: S.dim }, clockOf(row.at)),
+      )
+    }
+
     // ── 页面 ────────────────────────────────────────────────────────────────
     function RoutePanel() {
       const [state, setState] = React.useState({ status: 'loading', path: '', text: '', message: null, error: null })
       const [catalog, setCatalog] = React.useState({ providers: [], error: null })
+      const [rounds, setRounds] = React.useState({ status: 'loading', rows: [], error: null })
 
       const load = React.useCallback(async () => {
         setState((prev) => ({ ...prev, status: 'loading', error: null, message: null }))
+        setRounds((prev) => ({ ...prev, status: 'loading', error: null }))
         try {
-          const [configResponse, modelsResponse] = await Promise.all([
+          const [configResponse, modelsResponse, roundsResponse] = await Promise.all([
             fetch(CONFIG, { headers: { accept: 'application/json' } }),
             fetch(MODELS, { headers: { accept: 'application/json' } }).catch(() => null),
+            fetch(ROUNDS, { headers: { accept: 'application/json' } }).catch(() => null),
           ])
           const body = await configResponse.json()
           if (!configResponse.ok) throw new Error(body?.error ?? `HTTP ${configResponse.status}`)
@@ -153,6 +240,14 @@ window.__ModuleLoader__.load({
             setCatalog(models?.providers
               ? { providers: models.providers, error: null }
               : { providers: [], error: models?.error ?? `HTTP ${modelsResponse.status}` })
+          }
+          if (roundsResponse) {
+            const recent = await roundsResponse.json().catch(() => null)
+            setRounds(roundsResponse.ok
+              ? { status: 'ready', rows: Array.isArray(recent?.rounds) ? recent.rounds : [], error: null }
+              : { status: 'ready', rows: [], error: recent?.error ?? `HTTP ${roundsResponse.status}` })
+          } else {
+            setRounds({ status: 'ready', rows: [], error: '读取最近委派失败' })
           }
           setState({ status: 'ready', path: body.path ?? '', text: body.text ?? '', message: null, error: null })
         } catch (error) {
@@ -207,6 +302,9 @@ window.__ModuleLoader__.load({
         }
       }
 
+      // 合计只加算得出来的行：读不出日志的那次不假装知道它花了多少。
+      const spent = rounds.rows.reduce((sum, row) => sum + (row.cost?.status === 'ok' ? row.cost.usd : 0), 0)
+
       return h('section', { style: S.section },
         h('div', { style: S.title }, '阶段路由'),
         h('div', { style: S.desc },
@@ -254,6 +352,38 @@ window.__ModuleLoader__.load({
               problems.map((text) => h('div', { key: text, style: S.bad }, `配置有问题：${text}`)),
             )
           : null,
+
+        // 最近委派：实际跑的模型和花费，全部来自子会话自己的日志。
+        h('div', { style: S.subHead },
+          h('span', { style: S.subTitle }, '最近委派'),
+          h('span', { style: S.subNote }, '实际模型与花费，取自子会话日志，跟 route-check --cost 同一套算法。'),
+        ),
+        rounds.error
+          ? h('div', { style: S.bad }, `最近委派读不出来：${rounds.error}`)
+          : null,
+        h('div', { style: S.panel },
+          h('div', { style: S.roundsHead },
+            h('span', null, '阶段'),
+            h('span', null, '模型'),
+            h('span', null, '花费'),
+            h('span', null, '调用与令牌'),
+            h('span', null, '时间'),
+          ),
+          rounds.rows.length === 0
+            ? h('div', { style: { display: 'flex', padding: '10px 14px' } },
+                h('span', { style: S.dim }, rounds.status === 'loading'
+                  ? '读取中…'
+                  : '还没有记录。派一次活之后，这里会显示它实际跑的模型和花了多少。'),
+              )
+            : rounds.rows.map((row, index) => h(RoundRow, { key: `${row.childId ?? 'row'}-${index}`, row })),
+          rounds.rows.length > 0
+            ? h('div', { style: S.footer },
+                h('span', { style: S.dim }, `这 ${rounds.rows.length} 次合计 ${moneyOf(spent)}`),
+                h('span', { style: S.spacer }),
+                h('span', { style: S.note }, '一个子代理一个会话，这里是它整段会话的合计；可续跑的后续再续跑也算在同一个会话里。'),
+              )
+            : null,
+        ),
 
         h('details', null,
           h('summary', { style: S.summary }, '直接编辑 JSON'),

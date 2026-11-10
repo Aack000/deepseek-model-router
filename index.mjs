@@ -11,13 +11,15 @@
 // node_modules holds no `@deepseek-ai/*` packages, so a bundle that imported them
 // would fail to resolve. Everything comes from the Cordis context.
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
+import costLib from './lib/cost.js'
 
 /** The settings page talks to this exact path. */
 const ROUTE_PATH = '/plugins/dsh-deepseek-model-route/config'
 const MODELS_PATH = '/plugins/dsh-deepseek-model-route/models'
+const ROUNDS_PATH = '/plugins/dsh-deepseek-model-route/rounds'
 
 export const name = 'dmr'
 // `inject` makes Cordis wait for both services before apply() runs, and fail the
@@ -227,6 +229,18 @@ function toolFor(ctx, role, file, provider, released) {
         delivery: 'parent',
       })
 
+      // 插件页的「最近委派」读这一行。它只是展示，写不进去也不该影响派活。
+      recordRound(file, {
+        at: Date.now(),
+        role: role.id,
+        tool: role.tool,
+        childId: String(activation.childId),
+        provider: route.kind === 'pinned' ? route.provider : null,
+        model: route.kind === 'pinned' ? route.model : null,
+        effort: route.kind === 'pinned' ? route.effort : null,
+        lifecycle: route.kind === 'pinned' ? route.lifecycle : 'continuable',
+      })
+
       // `one-shot` releases the child as soon as it delivers, so a phase that only
       // needs the answer leaves no resident activation behind. `continuable` — the
       // default — keeps the native behaviour, where send_message can continue it.
@@ -253,7 +267,115 @@ function toolFor(ctx, role, file, provider, released) {
   }
 }
 
-// ─────────────────────────── settings page route ───────────────────────────
+// ────────────────────────── 插件详情页的接口 ──────────────────────────
+
+// ─────────────────────────── 最近委派（插件页用） ───────────────────────────
+
+/**
+ * 插件页那一块「最近委派」：派活时在 $DSH_HOME/dmr-rounds.jsonl 追加一行，
+ * 页面打开时再按子会话 id 去会话日志里算它花了多少。
+ *
+ * 为什么不只在内存里攒：宿主进程一重启就空了，页面会突然说「没有记录」，
+ * 可一小时前明明刚派过活。一行一个 JSON，坏行跳过，写失败只 warn。
+ */
+const ROUNDS_KEEP = 40
+const ROUNDS_ROWS = 8
+
+function roundsFile(file) {
+  return join(dirname(file), 'dmr-rounds.jsonl')
+}
+
+function recordRound(file, round) {
+  const target = roundsFile(file)
+  try {
+    appendFileSync(target, `${JSON.stringify(round)}\n`, 'utf8')
+  } catch (error) {
+    console.warn('[dmr] cannot record a delegation:', error?.message ?? error)
+    return
+  }
+  // 文件不会无限长：大了就只留最近 ROUNDS_KEEP 行。
+  try {
+    if (statSync(target).size < 256 * 1024) return
+    const lines = readFileSync(target, 'utf8').split('\n').filter((line) => line.trim() !== '')
+    writeFileSync(target, `${lines.slice(-ROUNDS_KEEP).join('\n')}\n`, 'utf8')
+  } catch (error) {
+    console.warn('[dmr] cannot trim the delegation log:', error?.message ?? error)
+  }
+}
+
+/** 最新的在前。坏行跳过：一条记录坏掉不该让整块面板消失。 */
+function readRounds(file, limit) {
+  let text
+  try {
+    text = readFileSync(roundsFile(file), 'utf8')
+  } catch (error) {
+    if (error?.code === 'ENOENT') return []
+    throw error
+  }
+
+  const rounds = []
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed === '') continue
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (parsed && typeof parsed === 'object') rounds.push(parsed)
+    } catch {
+      // 半行 / 非 JSON：跳过
+    }
+  }
+  return rounds.slice(-limit).reverse()
+}
+
+function roundsRoute(file) {
+  return async (req, res) => {
+    if (!isLocal(req)) return sendJson(res, 403, { error: 'local access only' })
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'method not allowed' })
+
+    let rounds
+    try {
+      rounds = readRounds(file, ROUNDS_ROWS)
+    } catch (error) {
+      return sendJson(res, 500, { error: String(error?.message ?? error) })
+    }
+
+    // 花费来自子会话自己的日志，跟 route-check.js --cost 用同一份计价器。
+    // 解压 + 逐行解析是同步的，所以每算完一行让出一拍：别把宿主的事件循环按住不放。
+    const home = dirname(file)
+    const rows = []
+    for (const round of rounds) {
+      await new Promise((resolve) => setImmediate(resolve))
+      const cost = typeof round.childId === 'string'
+        ? costLib.costOfSession(round.childId, { home })
+        : { status: 'missing' }
+      rows.push({
+        at: typeof round.at === 'number' ? round.at : null,
+        role: typeof round.role === 'string' ? round.role : null,
+        childId: typeof round.childId === 'string' ? round.childId : null,
+        provider: typeof round.provider === 'string' ? round.provider : null,
+        model: typeof round.model === 'string' ? round.model : null,
+        effort: typeof round.effort === 'string' ? round.effort : null,
+        lifecycle: typeof round.lifecycle === 'string' ? round.lifecycle : null,
+        cost: cost.status === 'ok'
+          ? {
+              status: 'ok',
+              usd: cost.usd,
+              unpriced: cost.unpriced,
+              calls: cost.calls,
+              input: cost.input,
+              output: cost.output,
+              cacheRead: cost.cacheRead,
+              // 子会话日志里的第一条 request/header：这才是**实际**跑的模型，
+              // 上面那三个字段只是派活时声明的值。
+              actual: cost.header ?? null,
+            }
+          : { status: cost.status, bytes: typeof cost.bytes === 'number' ? cost.bytes : null },
+      })
+    }
+
+    return sendJson(res, 200, { rounds: rows, file: roundsFile(file) })
+  }
+}
 
 function sendJson(res, status, body) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
@@ -442,6 +564,10 @@ export function apply(ctx, config = {}) {
         httpCtx.effect(
           () => httpCtx.webServer.register({ kind: 'exact', path: MODELS_PATH, handler: modelsRoute(modelCache) }),
           'dmr: models route',
+        )
+        httpCtx.effect(
+          () => httpCtx.webServer.register({ kind: 'exact', path: ROUNDS_PATH, handler: roundsRoute(file) }),
+          'dmr: rounds route',
         )
         httpCtx.effect(
           () => httpCtx.webServer.register({

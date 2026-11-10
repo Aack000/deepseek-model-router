@@ -4,17 +4,19 @@
 
 > 前身是 Claude Code 插件 [claude-model-router](https://github.com/Aack000/claude-model-router)。思路保留，代码不搬：CMR 有一半代码在干 Claude Code 专属的活儿（改 `settings.json`、读写 CC Switch 的 sqlite、拼 `ANTHROPIC_DEFAULT_*_MODEL` 别名、解析 `~/.claude/projects` 的 transcript），这些在 DSH 里没有对应物，也不需要。
 
-## 当前状态：v1
+## 当前状态：v4
 
 | 部件 | 作用 |
 |---|---|
-| `index.mjs` | host 插件：注册 `plan_subagent` / `impl_subagent` / `review_subagent`，**每次调用读一遍 `dmr.json`** 决定子代理的 provider/model/effort |
+| `index.mjs` | host 插件：注册 `plan_subagent` / `impl_subagent` / `review_subagent`，**每次调用读一遍 `dmr.json`** 决定子代理的 provider/model/effort；另提供插件详情页用的四个接口 |
+| `client.js` | client 插件：注册到 `plugins.detail.section`，在**插件自己的详情页**里画路由表和「最近委派」 |
 | `cordis.patch.yml` | 一行 host 平面插件行（**没有 preset**，见下） |
 | `dmr.example.json` | 路由表示例，复制成 `$DSH_HOME/dmr.json` 后编辑 |
 | `route-check.js` | 角色归属 + 模型核对 + 每轮花费（`--cost`）。期望值取自**该次派活的声明路由**（工具把当时生效的路由写进返回文本），没有声明才回退到当前 `dmr.json`——改表不会误伤历史轮次，「声明 A 实际跑 B」照样抓得出 |
 | `usage-audit.js` | token 汇总 + 美元计价 |
 | `lib/session-log.js` | 多帧 zstd 结构解析（RFC 8878 帧头 + 块头，精确帧边界与截断判定） |
 | `lib/pricing.js` | 价表（$/百万 token）与分时计价 |
+| `lib/cost.js` | 单个会话的计价累计器 + 按会话 id 找日志；`route-check --cost` 和详情页共用这一份 |
 
 ## 为什么不用 preset
 
@@ -73,12 +75,13 @@ node usage-audit.js --cost --since 2026-11-04
 
 ### v2：设置页（已完成）
 
-Plugins 设置区里的 **DeepSeek Model Route** 页：
+Plugins 详情页里 **DeepSeek Model Route** 自己那一页（`plugins.detail.section`，不是 Settings 的标签页）：
 
 - host 侧两个接口（仅回环地址）：
   - `GET/PUT /plugins/dsh-deepseek-model-route/config` —— 返回文件路径与原文；PUT 校验后写回
   - `GET /plugins/dsh-deepseek-model-route/models` —— 从 `llm.listProviders()` / `llm.listModels()` / `resolveModelInfo()` **实时**读可用模型与 effort 档位，缓存 60 秒
-- client 侧注册到 `settings.plugins.tab`：三个角色各一组 provider / model / effort 下拉，选完保存；也可以展开直接改 JSON
+- client 侧注册到 `plugins.detail.section`：三个角色各一组 provider / model / effort / lifecycle 下拉，选完保存；也可以展开直接改 JSON。这个槽在**每个**插件页都会渲染，所以组件对别的插件返回 null
+- 配置里的模型不在实时目录里时，页面直接把问题列出来（派活时 `index.mjs` 的预检也会拦，这里是提前说）
 - 校验在写之前：角色名必须是 `plan`/`impl`/`review`，`provider`/`model` 非空字符串，`effort` 可选字符串；不合法返回 400 且**不落盘**
 
 实测（2026-11-04）：
@@ -117,8 +120,18 @@ DMR 不做「关闭按钮」（删不掉目录条目，做出来是假功能）�
 ### v3 之后
 
 - locale 资源（页面文案目前内联中文）
-- 把「本轮子代理数」显示在页面上（`route-check` 已经在数）
 - 可选：按角色配 `agentPreset`，让审查子代理拿到只读的工具集
+
+### v4：最近委派（已完成）
+
+详情页的路由表下面多了一块「最近委派」：每次派活只写一行到 `$DSH_HOME/dmr-rounds.jsonl`（`at` / `role` / `childId` / 声明的 provider·model·effort / lifecycle），页面打开时按 `childId` 去**子会话自己的日志**里算花费。
+
+- `GET /plugins/dsh-deepseek-model-route/rounds` —— 回最近 8 次，最新在前；每行带 `cost: { status: 'ok' | 'missing' | 'too-large' | 'unreadable', … }`
+- 计价走 `lib/cost.js`，和 `route-check.js --cost` **同一份实现**（同一个累计器、同一张价表），所以页面上的数和命令行不会对不上
+- 面板只做展示：记录写不进去、日志丢了、日志超过 48 MB，都只让那一行显示「—」或「日志过大」，不影响派活
+- 会话日志按 `<id>` 找：主会话目录名带 `session-` 前缀，子代理直接用 id，两者同层，扫描结果缓存 5 秒；计价结果按「文件 + 大小 + mtime」缓存 8 秒，子会话在跑的时候会跟着变大
+
+实测（2026-11-10）：`85e683b0` → `$0.0221` / 26 次调用、`d93b29e5` → `$0.0809` / 40 次，与 `route-check --cost` 逐位一致；坏行跳过、`childId` 找不到的记 `missing`、非回环地址 403、非 GET 405。
 
 ## 已知限制
 
