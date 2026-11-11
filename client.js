@@ -68,6 +68,8 @@ window.__ModuleLoader__.load({
       'rounds.total': '这 {count} 次合计 {usd}',
       'rounds.note': '一个子代理一个会话，这里是它整段会话的合计',
       'json.edit': '直接编辑 JSON',
+      'foot.config': '配置在 $DSH_HOME/dmr.json，改完下一个子代理生效。',
+      'foot.check': '核对：node doctor.js · node route-check.js --cost',
     }
     const en = {
       'nav': 'Model route',
@@ -124,6 +126,8 @@ window.__ModuleLoader__.load({
       'rounds.total': 'Shown: {count} · total {usd}',
       'rounds.note': 'One subagent, one session; this is its whole session',
       'json.edit': 'Edit the JSON directly',
+      'foot.config': 'Config lives in $DSH_HOME/dmr.json; an edit applies to the next subagent.',
+      'foot.check': 'Check: node doctor.js · node route-check.js --cost',
     }
 
     // ── 视觉 ────────────────────────────────────────────────────────────────
@@ -193,6 +197,8 @@ window.__ModuleLoader__.load({
       dim: { fontSize: 11.5, opacity: 0.6 },
       clock: { display: 'flex', flexDirection: 'column', gap: 2 },
       released: { fontSize: 10.5, color: '#3c9d5d', whiteSpace: 'nowrap' },
+      // 页面最底下那两行：配置在哪、怎么核对。插件页的其它区块由 DSH 渲染，这里是我们能放的最后一块。
+      bottom: { display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11.5, opacity: 0.55, lineHeight: 1.7 },
     }
 
     // ── 数据 ────────────────────────────────────────────────────────────────
@@ -534,6 +540,12 @@ window.__ModuleLoader__.load({
             style: S.textarea,
             onChange: (event) => setState((prev) => ({ ...prev, text: event.target.value, message: null, error: null })),
           }),
+        ),
+
+        // 插件页最底下两行：配置在哪、怎么核对。正文里不再重复这些。
+        h('div', { style: S.bottom },
+          h('div', null, t('foot.config')),
+          h('div', null, t('foot.check')),
         ),
       )
     }
