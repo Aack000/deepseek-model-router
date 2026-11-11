@@ -11,7 +11,7 @@
 // node_modules holds no `@deepseek-ai/*` packages, so a bundle that imported them
 // would fail to resolve. Everything comes from the Cordis context.
 
-import { readFileSync, writeFileSync, appendFileSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, renameSync, unlinkSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import costLib from './lib/cost.js'
@@ -88,15 +88,17 @@ function readRoute(file, roleId) {
   const entry = parsed?.roles?.[roleId]
   if (!entry || typeof entry !== 'object') return { kind: 'inherited' }
 
-  const provider = entry.provider
-  const model = entry.model
-  if (typeof provider !== 'string' || provider.length === 0) {
+  // Trim before comparing: a stray space in the JSON would otherwise surface as
+  // 「模型不在目录里」 and point at the wrong problem.
+  const provider = typeof entry.provider === 'string' ? entry.provider.trim() : ''
+  const model = typeof entry.model === 'string' ? entry.model.trim() : ''
+  if (provider.length === 0) {
     throw new Error(`DMR: roles.${roleId}.provider must be a non-empty string in ${file}`)
   }
-  if (typeof model !== 'string' || model.length === 0) {
+  if (model.length === 0) {
     throw new Error(`DMR: roles.${roleId}.model must be a non-empty string in ${file}`)
   }
-  const effort = typeof entry.effort === 'string' && entry.effort.length > 0 ? entry.effort : undefined
+  const effort = typeof entry.effort === 'string' && entry.effort.trim() !== '' ? entry.effort.trim() : undefined
   // Absent means `continuable`: that is DSH's native behaviour, and a planner or a
   // reviewer is often continued with send_message. Opting into `one-shot` is the
   // only way to get a child released as soon as it delivers.
@@ -201,17 +203,23 @@ function toolFor(ctx, role, file, provider, released) {
             )
           }
           if (route.effort && typeof llm.resolveModelInfo === 'function') {
+            // 不要用一个 catch 包住「解析」和「比对」：比对抛出的错误会被同一个 catch
+            // 吞掉，effort 写错就永远不报。两段分开，各自给带文件的错误话术。
+            let info
             try {
-              const info = await llm.resolveModelInfo(route.provider, route.model)
-              const efforts = (info?.reasoning?.efforts ?? []).map((entry) => entry.id)
-              if (efforts.length > 0 && !efforts.includes(route.effort)) {
-                throw new Error(
-                  `DMR: roles.${role.id}.effort "${route.effort}" is not offered by ${route.provider}/${route.model} `
-                  + `(available: ${efforts.join(', ')}) — fix ${file}`,
-                )
-              }
+              info = await llm.resolveModelInfo(route.provider, route.model)
             } catch (error) {
-              if (!String(error?.message ?? error).startsWith('DMR:')) throw error
+              throw new Error(
+                `DMR: cannot resolve ${route.provider}/${route.model} to check roles.${role.id}.effort `
+                + `(${error?.message ?? error}) — fix ${file}`,
+              )
+            }
+            const efforts = (info?.reasoning?.efforts ?? []).map((entry) => entry.id)
+            if (efforts.length > 0 && !efforts.includes(route.effort)) {
+              throw new Error(
+                `DMR: roles.${role.id}.effort "${route.effort}" is not offered by ${route.provider}/${route.model} `
+                + `(available: ${efforts.join(', ')}) — fix ${file}`,
+              )
             }
           }
         }
@@ -310,6 +318,26 @@ function roundsFile(file) {
   return join(dirname(file), 'dmr-rounds.jsonl')
 }
 
+/**
+ * Replace a file in one step: write a sibling temp file, then rename over the target.
+ * A crash mid-write leaves the old file intact instead of a truncated one, and a
+ * reader never sees half a document.
+ */
+function writeFileAtomic(file, text) {
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`
+  try {
+    writeFileSync(tmp, text, 'utf8')
+    renameSync(tmp, file)
+  } catch (error) {
+    try {
+      unlinkSync(tmp)
+    } catch {
+      // 临时文件没建出来 / 已经没了：原始错误才是要报的那个
+    }
+    throw error
+  }
+}
+
 function recordRound(file, round) {
   const target = roundsFile(file)
   try {
@@ -322,7 +350,7 @@ function recordRound(file, round) {
   try {
     if (statSync(target).size < 256 * 1024) return
     const lines = readFileSync(target, 'utf8').split('\n').filter((line) => line.trim() !== '')
-    writeFileSync(target, `${lines.slice(-ROUNDS_KEEP).join('\n')}\n`, 'utf8')
+    writeFileAtomic(target, `${lines.slice(-ROUNDS_KEEP).join('\n')}\n`)
   } catch (error) {
     console.warn('[dmr] cannot trim the delegation log:', error?.message ?? error)
   }
@@ -389,7 +417,10 @@ function roundsRoute(file) {
 
     // 花费来自子会话自己的日志，跟 route-check.js --cost 用同一份计价器。
     // 解压 + 逐行解析是同步的，所以每算完一行让出一拍：别把宿主的事件循环按住不放。
-    const home = dirname(file)
+    //
+    // 会话日志在 DSH_HOME/sessions 下，**不是**在 dmr.json 旁边：插件配了自定义
+    // `path` 时，用 dirname(file) 会把每一行都算成 missing。
+    const home = process.env.DSH_HOME || join(homedir(), '.dsh')
     const rows = []
     for (const round of recent.rows) {
       await new Promise((resolve) => setImmediate(resolve))
@@ -530,6 +561,14 @@ function configRoute(file) {
     }
 
     if (req.method === 'PUT' || req.method === 'POST') {
+      // Require JSON: it forces a CORS preflight, which this server does not answer,
+      // so a random web page cannot POST `text/plain` at the loopback port and
+      // rewrite the route table. (The page itself always sends JSON.)
+      const type = String(req.headers?.['content-type'] ?? '').toLowerCase()
+      if (!type.includes('application/json')) {
+        return sendJson(res, 415, { error: 'content-type must be application/json' })
+      }
+
       let body
       try {
         body = await readBody(req)
@@ -548,7 +587,8 @@ function configRoute(file) {
         return sendJson(res, 400, { error: String(error?.message ?? error) })
       }
       try {
-        writeFileSync(file, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8')
+        // 不原地写：写到一半崩溃会把 dmr.json 截成半个 JSON，之后每次派活都报错。
+        writeFileAtomic(file, `${JSON.stringify(parsed, null, 2)}\n`)
         return sendJson(res, 200, { path: file, exists: true, text: readFileSync(file, 'utf8') })
       } catch (error) {
         return sendJson(res, 500, { error: String(error?.message ?? error) })
