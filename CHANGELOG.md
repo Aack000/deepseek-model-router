@@ -15,6 +15,12 @@
 
 - 路由表的结构校验搬到 `lib/route-table.js`，面板的 `PUT /config` 与 `doctor.js` 共用一份；400 的错误话术保持不变。
 
+### 「最近委派」的已释放标记
+
+- `one-shot` 释放时往 `dmr-rounds.jsonl` 追加一行 `{ kind: 'release', childId, at }`，`/rounds` 每行多一个 `releasedAt`（没记着就是 `null`）。
+- 面板在「时间」列下面给这些行标「已释放」，鼠标悬停显示释放时间；没有记录的行不写标记，不猜「未释放」。
+- 为什么落盘：释放列表原本只在宿主内存里，进程一重启，上一轮那几个 one-shot 有没有交付释放就说不清了。
+
 ## v4 — 最近委派（2026-11-10）
 
 - 详情页的路由表下面多一块「最近委派」：每次派活往 `$DSH_HOME/dmr-rounds.jsonl` 追加一行（`at` / `role` / `childId` / 声明的 provider·model·effort / lifecycle），页面打开时按 `childId` 去**子会话自己的日志**里算钱。

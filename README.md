@@ -129,12 +129,14 @@ DMR 不做「关闭按钮」（删不掉目录条目，做出来是假功能）�
 
 详情页的路由表下面多了一块「最近委派」：每次派活只写一行到 `$DSH_HOME/dmr-rounds.jsonl`（`at` / `role` / `childId` / 声明的 provider·model·effort / lifecycle），页面打开时按 `childId` 去**子会话自己的日志**里算花费。
 
-- `GET /plugins/dsh-deepseek-model-route/rounds` —— 回最近 8 次，最新在前；每行带 `cost: { status: 'ok' | 'missing' | 'too-large' | 'unreadable', … }`
+- `GET /plugins/dsh-deepseek-model-route/rounds` —— 回最近 8 次，最新在前；每行带 `cost: { status: 'ok' | 'missing' | 'too-large' | 'unreadable', … }` 与 `releasedAt`
 - 计价走 `lib/cost.js`，和 `route-check.js --cost` **同一份实现**（同一个累计器、同一张价表），所以页面上的数和命令行不会对不上
 - 面板只做展示：记录写不进去、日志丢了、日志超过 48 MB，都只让那一行显示「—」或「日志过大」，不影响派活
 - 会话日志按 `<id>` 找：主会话目录名带 `session-` 前缀，子代理直接用 id，两者同层，扫描结果缓存 5 秒；计价结果按「文件 + 大小 + mtime」缓存 8 秒，子会话在跑的时候会跟着变大
+- `one-shot` 释放时往同一份日志追加一行 `{ kind: 'release', childId, at }`，面板给那一行标「已释放」。只留在内存里的话，宿主一重启，上一轮到底释放没释放就只能靠猜；日志里没记着的行不写任何标记，不猜「未释放」。
 
 实测（2026-11-10）：`85e683b0` → `$0.0221` / 26 次调用、`d93b29e5` → `$0.0809` / 40 次，与 `route-check --cost` 逐位一致；坏行跳过、`childId` 找不到的记 `missing`、非回环地址 403、非 GET 405。
+实测（2026-11-11）：假 ctx 挂 `impl_subagent`（`one-shot`）与 `plan_subagent`（`continuable`），交付后 `impl` 被 dispose，日志里多出一行 `kind: 'release'`，`/rounds` 给 `impl` 的 `releasedAt` 是时间戳、给 `plan` 的是 `null`；坏行与「未知 childId 的释放行」都不影响表格。
 
 ### 自检：`doctor.js`（已完成）
 
