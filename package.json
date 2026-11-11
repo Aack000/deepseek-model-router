@@ -1,6 +1,6 @@
 {
   "name": "dsh-deepseek-model-route",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Phase-routed delegation for DSH: the plan, implement and review subagents can each run on a different model. The route table is read per delegation, so an edit applies without reinstalling; the CLI tools check each round's actual model and spend against the session logs.",
   "keywords": [

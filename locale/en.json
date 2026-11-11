@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "DeepSeek Model Route",
-    "description": "Routes the plan, implement and review phases to different models, and checks each round's model and spend against the session logs."
+    "description": "Routes the plan, implement and review phases to different models, and checks each round's model and spend against the session logs.",
+    "detail": "docs/page.md"
   }
 }
