@@ -252,6 +252,57 @@ function checkPackage(rows) {
       rows.push(sub('插件行', 'ok', `${patchRel} → ${PATCH_ID}${provider ? `（provider: ${provider[1]}）` : ''}`));
     }
   }
+
+  rows.push(checkLocales(pkg));
+}
+
+/**
+ * 面板与插件列表的文案走官方 locale：`locale/<lang>.json` 的 meta 由宿主读，
+ * 包内文案靠 client 半的 `inject: ['locale']`。这几处任一缺失，表现都是「面板突然
+ * 变成一串 key」或「插件标题退回包名」，所以一起查。
+ */
+function checkLocales(pkg) {
+  const problems = [];
+  const titles = [];
+
+  for (const lang of ['zh', 'en']) {
+    const file = path.join(PKG_DIR, 'locale', `${lang}.json`);
+    const text = readText(file);
+    if (text === null) {
+      problems.push(`缺少 locale/${lang}.json`);
+      continue;
+    }
+    let parsed = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      problems.push(`locale/${lang}.json 不是合法 JSON`);
+      continue;
+    }
+    const title = parsed && parsed.meta && parsed.meta.title;
+    if (typeof title !== 'string' || title.trim() === '') {
+      problems.push(`locale/${lang}.json 没有 meta.title`);
+    } else {
+      titles.push(`${lang}: ${title}`);
+    }
+  }
+
+  // 官方把 locale 文件作为包导出暴露，宿主按 <包名>/locale/<lang>.json 去读。
+  const exported = pkg.exports && pkg.exports['./locale/*.json'];
+  const exportOk = typeof exported === 'string'
+    || (exported && typeof exported === 'object' && typeof exported.default === 'string');
+  if (!exportOk) problems.push('package.json 没有导出 ./locale/*.json');
+
+  const inject = pkg.dsh && pkg.dsh.client && Array.isArray(pkg.dsh.client.inject)
+    ? pkg.dsh.client.inject
+    : [];
+  if (!inject.includes('@deepseek-ai/dsh-client-locale')) {
+    problems.push('dsh.client.inject 里没有 @deepseek-ai/dsh-client-locale');
+  }
+
+  return problems.length === 0
+    ? sub('locale 资源', 'ok', titles.join(' · '))
+    : sub('locale 资源', 'fail', problems.join('；'), '插件列表的标题/说明和面板文案都靠它');
 }
 
 /** profile 的 cordis.patch.yml 有没有把这一行关掉：按顶层 "- id:" 切块找 disabled: true */
