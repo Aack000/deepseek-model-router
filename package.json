@@ -2,7 +2,7 @@
   "name": "dsh-deepseek-model-route",
   "version": "0.1.0",
   "private": true,
-  "description": "DMR（DeepSeek Model Route）：把「规划 / 实现 / 审查」三个阶段分别路由到不同模型。每次派活时读一次路由表，改配置即生效、无需重装；附带两个工具，能从会话日志核对每轮子代理实际跑的模型，并算出这一轮花了多少钱。",
+  "description": "Phase-routed delegation for DSH: the plan, implement and review subagents can each run on a different model. The route table is read per delegation, so an edit applies without reinstalling; the CLI tools check each round's actual model and spend against the session logs.",
   "keywords": [
     "dsh",
     "deepseek-harness",
@@ -14,7 +14,8 @@
   "exports": {
     ".": "./index.mjs",
     "./client": "./client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "dsh": {
     "bundle": {
@@ -24,6 +25,7 @@
       "platform": "web",
       "immediately": true,
       "inject": [
+        "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-settings-plugins"
       ]
     }

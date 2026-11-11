@@ -8,8 +8,123 @@ window.__ModuleLoader__.load({
     const MODELS = '/plugins/dsh-deepseek-model-route/models'
     const ROUNDS = '/plugins/dsh-deepseek-model-route/rounds'
     const ROLES = ['plan', 'impl', 'review']
-    const ROLE_LABEL = { plan: '规划', impl: '实现', review: '审查' }
-    const ROLE_HINT = { plan: '读代码出方案', impl: '改文件的主力', review: '只读、找缺陷' }
+
+    // 文案跟着官方的 `@deepseek-ai/dsh-client-locale` 走：注册一个命名空间，
+    // 基线语言是 zh 与 en（必须成对），其余语言按各自的 fallback 链落到 en。
+    // 中文仍然是主语言；英文不是另写一套界面，是同一份 key 的另一份值。
+    const NS = 'dsh-deepseek-model-route'
+    const zh = {
+      'nav': '模型路由',
+      'title': '阶段路由',
+      'intro': '三个阶段的子代理各走各的模型，保存后下一个子代理生效。',
+      'catalog.failed': '模型目录读不出来：{error}。下拉不可用，但可以展开下面的 JSON 直接改。',
+      'col.phase': '阶段',
+      'col.provider': '供应商',
+      'col.model': '模型',
+      'col.effort': '推理强度',
+      'col.lifecycle': '生命周期',
+      'role.plan': '规划',
+      'role.impl': '实现',
+      'role.review': '审查',
+      'role.planHint': '读代码出方案',
+      'role.implHint': '改文件的主力',
+      'role.reviewHint': '只读、找缺陷',
+      'role.unknown': '未知',
+      'lifecycle.continuable': '可续跑',
+      'lifecycle.oneShot': '交付即释放',
+      'lifecycle.hint': '可续跑：跑完仍可用 send_message 续同一个子代理。交付即释放：拿到结果就释放激活，之后续跑要走冷恢复。',
+      'effort.default': '默认',
+      'action.save': '保存',
+      'action.reload': '重新读取',
+      'state.saved': '已保存，下一个子代理生效。',
+      'state.invalidJson': 'JSON 不合法：{error}',
+      'state.notObject': '顶层必须是一个对象',
+      'problem.line': '配置有问题：{text}',
+      'problem.provider': '{role}：供应商 "{provider}" 不在当前可用列表里',
+      'problem.model': '{role}：模型 "{model}" 不在 {provider} 的可用列表里（可用：{list}）',
+      'problem.effort': '{role}：effort "{effort}" 不在 {model} 支持的档位里（可用：{list}）',
+      'list.separator': '、',
+      'rounds.title': '最近委派',
+      'rounds.failed': '最近委派读不出来：{error}',
+      'rounds.loading': '读取中…',
+      'rounds.empty': '还没有记录，派一次活之后就有了。',
+      'rounds.colPhase': '阶段',
+      'rounds.colModel': '模型',
+      'rounds.colCost': '花费',
+      'rounds.colCalls': '调用与令牌',
+      'rounds.colTime': '时间',
+      'rounds.inherited': '继承父会话',
+      'rounds.dash': '—',
+      'rounds.tooLarge': '日志过大',
+      'rounds.tooLargeHint': '{mb} MB，未计价',
+      'rounds.unreadable': '读不出',
+      'rounds.unreadableHint': '子会话日志坏了',
+      'rounds.noLog': '日志还没生成',
+      'rounds.calls': '{calls} 次 · 入 {input} / 出 {output}',
+      'rounds.actualTitle': '实际 {actual} · 声明 {declared}',
+      'rounds.declaredTitle': '声明 {declared}（子会话日志里还没有模型）',
+      'rounds.released': '已释放',
+      'rounds.releasedAt': '释放于 {time}',
+      'rounds.total': '这 {count} 次合计 {usd}',
+      'rounds.note': '一个子代理一个会话，这里是它整段会话的合计',
+      'json.edit': '直接编辑 JSON',
+    }
+    const en = {
+      'nav': 'Model route',
+      'title': 'Phase routing',
+      'intro': 'Each phase delegates to its own model. A save applies to the next subagent.',
+      'catalog.failed': 'The model catalog is unavailable: {error}. The dropdowns are off, but the JSON below can still be edited.',
+      'col.phase': 'Phase',
+      'col.provider': 'Provider',
+      'col.model': 'Model',
+      'col.effort': 'Effort',
+      'col.lifecycle': 'Lifecycle',
+      'role.plan': 'Plan',
+      'role.impl': 'Implement',
+      'role.review': 'Review',
+      'role.planHint': 'reads the code, writes the plan',
+      'role.implHint': 'the one that edits files',
+      'role.reviewHint': 'read-only, hunts defects',
+      'role.unknown': 'Unknown',
+      'lifecycle.continuable': 'Continuable',
+      'lifecycle.oneShot': 'Release on delivery',
+      'lifecycle.hint': 'Continuable: send_message can continue the same child. Release on delivery: the activation is disposed as soon as the answer arrives, and a later send_message takes the cold-recovery path.',
+      'effort.default': 'Default',
+      'action.save': 'Save',
+      'action.reload': 'Reload',
+      'state.saved': 'Saved. Applies to the next subagent.',
+      'state.invalidJson': 'Invalid JSON: {error}',
+      'state.notObject': 'the top level must be an object',
+      'problem.line': 'Config problem: {text}',
+      'problem.provider': '{role}: provider "{provider}" is not in the live catalog',
+      'problem.model': '{role}: model "{model}" is not offered by {provider} (available: {list})',
+      'problem.effort': '{role}: effort "{effort}" is not offered by {model} (available: {list})',
+      'list.separator': ', ',
+      'rounds.title': 'Recent delegations',
+      'rounds.failed': 'Recent delegations unavailable: {error}',
+      'rounds.loading': 'Loading…',
+      'rounds.empty': 'Nothing yet. One delegation and it shows up here.',
+      'rounds.colPhase': 'Phase',
+      'rounds.colModel': 'Model',
+      'rounds.colCost': 'Cost',
+      'rounds.colCalls': 'Calls and tokens',
+      'rounds.colTime': 'When',
+      'rounds.inherited': 'inherits the parent',
+      'rounds.dash': '—',
+      'rounds.tooLarge': 'log too large',
+      'rounds.tooLargeHint': '{mb} MB, not priced',
+      'rounds.unreadable': 'unreadable',
+      'rounds.unreadableHint': 'the child log is damaged',
+      'rounds.noLog': 'no log yet',
+      'rounds.calls': '{calls} calls · in {input} / out {output}',
+      'rounds.actualTitle': 'actual {actual} · declared {declared}',
+      'rounds.declaredTitle': 'declared {declared} (the child log has no model yet)',
+      'rounds.released': 'released',
+      'rounds.releasedAt': 'released at {time}',
+      'rounds.total': 'Shown: {count} · total {usd}',
+      'rounds.note': 'One subagent, one session; this is its whole session',
+      'json.edit': 'Edit the JSON directly',
+    }
 
     // ── 视觉 ────────────────────────────────────────────────────────────────
     const GRID = '96px minmax(150px,1fr) minmax(190px,1.3fr) 96px 128px'
@@ -84,7 +199,7 @@ window.__ModuleLoader__.load({
     function parse(text) {
       try {
         const parsed = JSON.parse(text)
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: '顶层必须是一个对象' }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: 'not-an-object' }
         return { table: parsed, error: null }
       } catch (error) {
         return { error: String(error?.message ?? error) }
@@ -124,15 +239,15 @@ window.__ModuleLoader__.load({
       return JSON.stringify({ ...table, roles }, null, 2)
     }
 
-    function RoleLine({ role, entry, providers, onChange }) {
+    function RoleLine({ role, entry, providers, onChange, t }) {
       const provider = providers.find((item) => item.id === entry.provider)
       const models = provider?.models ?? []
       const model = models.find((item) => item.id === entry.model)
       const efforts = model?.efforts ?? []
       return h('div', { style: S.liner },
         h('div', { style: S.roleCell },
-          h('span', { style: S.roleName }, ROLE_LABEL[role] ?? role),
-          h('span', { style: S.roleHint }, ROLE_HINT[role] ?? ''),
+          h('span', { style: S.roleName }, t(`role.${role}`)),
+          h('span', { style: S.roleHint }, t(`role.${role}Hint`)),
         ),
         h('select', {
           style: S.select,
@@ -159,24 +274,24 @@ window.__ModuleLoader__.load({
           value: entry.effort ?? '',
           onChange: (event) => onChange({ effort: event.target.value || undefined }),
         },
-          h('option', { value: '' }, '默认'),
+          h('option', { value: '' }, t('effort.default')),
           (efforts.length > 0 ? efforts : ['off', 'low', 'high', 'max'])
             .map((effort) => h('option', { key: effort, value: effort }, effort)),
         ),
         h('select', {
           style: S.select,
           value: entry.lifecycle ?? 'continuable',
-          title: '可续跑：跑完仍可用 send_message 续同一个子代理。交付即释放：拿到结果就释放激活，之后续跑要走冷恢复。',
+          title: t('lifecycle.hint'),
           onChange: (event) => onChange({ lifecycle: event.target.value }),
         },
-          h('option', { value: 'continuable' }, '可续跑'),
-          h('option', { value: 'one-shot' }, '交付即释放'),
+          h('option', { value: 'continuable' }, t('lifecycle.continuable')),
+          h('option', { value: 'one-shot' }, t('lifecycle.oneShot')),
         ),
       )
     }
 
     /** 一行委派记录：实际跑的模型、花了多少、多大上下文。 */
-    function RoundRow({ row }) {
+    function RoundRow({ row, t }) {
       const cost = row.cost ?? { status: 'missing' }
       const actual = cost.actual ?? null
       const declared = row.model
@@ -190,29 +305,36 @@ window.__ModuleLoader__.load({
         (row.model && actual?.model && row.model !== actual.model)
         || (row.provider && actual?.provider && row.provider !== actual.provider),
       )
-      const route = model ? `${model}${effort ? ` @${effort}` : ''}` : '继承父会话'
-      const title = actual?.model
-        ? `实际 ${actual.provider ?? '?'}/${actual.model}${actual.effort ? ` @${actual.effort}` : ''}${declared ? ` · 声明 ${declared}` : ''}`
+      const route = model ? `${model}${effort ? ` @${effort}` : ''}` : t('rounds.inherited')
+      const actualText = actual?.model
+        ? `${actual.provider ?? '?'}/${actual.model}${actual.effort ? ` @${actual.effort}` : ''}`
+        : null
+      const title = actualText
+        ? t('rounds.actualTitle', { actual: actualText, declared: declared ?? t('rounds.inherited') })
         : declared
-          ? `声明 ${declared}（子会话日志里还没有模型）`
-          : '继承父会话'
+          ? t('rounds.declaredTitle', { declared })
+          : t('rounds.inherited')
       let costText
       let tokenText
       if (cost.status === 'ok') {
         costText = `${moneyOf(cost.usd)}${cost.unpriced ? '*' : ''}`
-        tokenText = `${cost.calls ?? 0} 次 · 入 ${shortTokens(cost.input)} / 出 ${shortTokens(cost.output)}`
+        tokenText = t('rounds.calls', {
+          calls: cost.calls ?? 0,
+          input: shortTokens(cost.input),
+          output: shortTokens(cost.output),
+        })
       } else if (cost.status === 'too-large') {
-        costText = '日志过大'
-        tokenText = `${Math.round((cost.bytes ?? 0) / 1024 / 1024)} MB，未计价`
+        costText = t('rounds.tooLarge')
+        tokenText = t('rounds.tooLargeHint', { mb: Math.round((cost.bytes ?? 0) / 1024 / 1024) })
       } else if (cost.status === 'unreadable') {
-        costText = '读不出'
-        tokenText = '子会话日志坏了'
+        costText = t('rounds.unreadable')
+        tokenText = t('rounds.unreadableHint')
       } else {
-        costText = '—'
-        tokenText = '日志还没生成'
+        costText = t('rounds.dash')
+        tokenText = t('rounds.noLog')
       }
       return h('div', { style: S.roundsRow },
-        h('span', { style: S.roleName }, ROLE_LABEL[row.role] ?? row.role ?? '未知'),
+        h('span', { style: S.roleName }, row.role ? t(`role.${row.role}`) : t('role.unknown')),
         h('span', { style: mismatch ? { ...S.num, color: '#d9534f' } : S.num, title }, route),
         h('span', { style: S.num }, costText),
         h('span', { style: S.dim }, tokenText),
@@ -221,14 +343,14 @@ window.__ModuleLoader__.load({
           // 只标「日志里真的记着这次释放」的行：宿主重启前释放的 one-shot 没有记录，
           // 那就什么都不写，而不是猜一个「未释放」。
           row.releasedAt
-            ? h('span', { style: S.released, title: `释放于 ${clockOf(row.releasedAt)}` }, '已释放')
+            ? h('span', { style: S.released, title: t('rounds.releasedAt', { time: clockOf(row.releasedAt) }) }, t('rounds.released'))
             : null,
         ),
       )
     }
 
     // ── 页面 ────────────────────────────────────────────────────────────────
-    function RoutePanel() {
+    function RoutePanel({ t }) {
       const [state, setState] = React.useState({ status: 'loading', path: '', text: '', message: null, error: null })
       const [catalog, setCatalog] = React.useState({ providers: [], error: null })
       const [rounds, setRounds] = React.useState({ status: 'loading', rows: [], error: null })
@@ -256,7 +378,7 @@ window.__ModuleLoader__.load({
               ? { status: 'ready', rows: Array.isArray(recent?.rounds) ? recent.rounds : [], error: null }
               : { status: 'ready', rows: [], error: recent?.error ?? `HTTP ${roundsResponse.status}` })
           } else {
-            setRounds({ status: 'ready', rows: [], error: '读取最近委派失败' })
+            setRounds({ status: 'ready', rows: [], error: 'fetch failed' })
           }
           setState({ status: 'ready', path: body.path ?? '', text: body.text ?? '', message: null, error: null })
         } catch (error) {
@@ -276,7 +398,8 @@ window.__ModuleLoader__.load({
           })
           const body = await response.json()
           if (!response.ok) throw new Error(body?.error ?? `HTTP ${response.status}`)
-          setState((prev) => ({ ...prev, path: body.path ?? prev.path, text: body.text ?? prev.text, message: '已保存，下一个子代理生效。' }))
+          // 只存标记，渲染时再翻译：切换语言后这条提示也要跟着变。
+          setState((prev) => ({ ...prev, path: body.path ?? prev.path, text: body.text ?? prev.text, message: 'saved' }))
         } catch (error) {
           setState((prev) => ({ ...prev, message: null, error: String(error?.message ?? error) }))
         }
@@ -295,18 +418,28 @@ window.__ModuleLoader__.load({
           if (!entry.provider || !entry.model) continue
           const provider = catalog.providers.find((item) => item.id === entry.provider)
           if (!provider) {
-            problems.push(`${ROLE_LABEL[role]}：供应商 "${entry.provider}" 不在当前可用列表里`)
+            problems.push(t('problem.provider', { role: t(`role.${role}`), provider: entry.provider }))
             continue
           }
           const ids = (provider.models ?? []).map((item) => item.id)
           if (ids.length > 0 && !ids.includes(entry.model)) {
-            problems.push(`${ROLE_LABEL[role]}：模型 "${entry.model}" 不在 ${provider.id} 的可用列表里（可用：${ids.join('、')}）`)
+            problems.push(t('problem.model', {
+              role: t(`role.${role}`),
+              model: entry.model,
+              provider: provider.id,
+              list: ids.join(t('list.separator')),
+            }))
             continue
           }
           const model = (provider.models ?? []).find((item) => item.id === entry.model)
           const efforts = (model?.efforts ?? [])
           if (entry.effort && efforts.length > 0 && !efforts.includes(entry.effort)) {
-            problems.push(`${ROLE_LABEL[role]}：effort "${entry.effort}" 不在 ${entry.model} 支持的档位里（可用：${efforts.join('、')}）`)
+            problems.push(t('problem.effort', {
+              role: t(`role.${role}`),
+              effort: entry.effort,
+              model: entry.model,
+              list: efforts.join(t('list.separator')),
+            }))
           }
         }
       }
@@ -315,26 +448,27 @@ window.__ModuleLoader__.load({
       const spent = rounds.rows.reduce((sum, row) => sum + (row.cost?.status === 'ok' ? row.cost.usd : 0), 0)
 
       return h('section', { style: S.section },
-        h('div', { style: S.title }, '阶段路由'),
-        h('div', { style: S.desc }, '三个阶段的子代理各走各的模型，保存后下一个子代理生效。'),
+        h('div', { style: S.title }, t('title')),
+        h('div', { style: S.desc }, t('intro')),
 
         catalog.error
-          ? h('div', { style: S.bad }, `模型目录读不出来：${catalog.error}。下拉不可用，但可以展开下面的 JSON 直接改。`)
+          ? h('div', { style: S.bad }, t('catalog.failed', { error: catalog.error }))
           : null,
 
         h('div', { style: S.panel },
           h('div', { style: S.head },
-            h('span', null, '阶段'),
-            h('span', null, '供应商'),
-            h('span', null, '模型'),
-            h('span', null, '推理强度'),
-            h('span', null, '生命周期'),
+            h('span', null, t('col.phase')),
+            h('span', null, t('col.provider')),
+            h('span', null, t('col.model')),
+            h('span', null, t('col.effort')),
+            h('span', null, t('col.lifecycle')),
           ),
           ROLES.map((role) => h(RoleLine, {
             key: role,
             role,
             entry: roles[role] ?? {},
             providers: catalog.providers,
+            t,
             onChange: (patch) => setState((prev) => ({
               ...prev,
               text: withRole(prev.text || '{"roles":{}}', role, patch),
@@ -343,54 +477,56 @@ window.__ModuleLoader__.load({
             })),
           })),
           h('div', { style: S.footer },
-            h('button', { type: 'button', style: S.btnPrimary, onClick: save, disabled: !canSave }, '保存'),
-            h('button', { type: 'button', style: S.btn, onClick: load, disabled: state.status === 'loading' }, '重新读取'),
+            h('button', { type: 'button', style: S.btnPrimary, onClick: save, disabled: !canSave }, t('action.save')),
+            h('button', { type: 'button', style: S.btn, onClick: load, disabled: state.status === 'loading' }, t('action.reload')),
             h('span', { style: S.spacer }),
-            state.message ? h('span', { style: S.ok }, state.message) : null,
+            state.message ? h('span', { style: S.ok }, state.message === 'saved' ? t('state.saved') : state.message) : null,
             state.error ? h('span', { style: S.bad }, state.error) : null,
-            parsed.error ? h('span', { style: S.bad }, `JSON 不合法：${parsed.error}`) : null,
+            parsed.error
+              ? h('span', { style: S.bad }, t('state.invalidJson', {
+                error: parsed.error === 'not-an-object' ? t('state.notObject') : parsed.error,
+              }))
+              : null,
           ),
         ),
 
         problems.length > 0
           ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
-              problems.map((text) => h('div', { key: text, style: S.bad }, `配置有问题：${text}`)),
+              problems.map((text) => h('div', { key: text, style: S.bad }, t('problem.line', { text }))),
             )
           : null,
 
         // 最近委派：实际跑的模型和花费，全部来自子会话自己的日志。
         h('div', { style: S.subHead },
-          h('span', { style: S.subTitle }, '最近委派'),
+          h('span', { style: S.subTitle }, t('rounds.title')),
         ),
         rounds.error
-          ? h('div', { style: S.bad }, `最近委派读不出来：${rounds.error}`)
+          ? h('div', { style: S.bad }, t('rounds.failed', { error: rounds.error }))
           : null,
         h('div', { style: S.panel },
           h('div', { style: S.roundsHead },
-            h('span', null, '阶段'),
-            h('span', null, '模型'),
-            h('span', null, '花费'),
-            h('span', null, '调用与令牌'),
-            h('span', null, '时间'),
+            h('span', null, t('rounds.colPhase')),
+            h('span', null, t('rounds.colModel')),
+            h('span', null, t('rounds.colCost')),
+            h('span', null, t('rounds.colCalls')),
+            h('span', null, t('rounds.colTime')),
           ),
           rounds.rows.length === 0
             ? h('div', { style: { display: 'flex', padding: '10px 14px' } },
-                h('span', { style: S.dim }, rounds.status === 'loading'
-                  ? '读取中…'
-                  : '还没有记录，派一次活之后就有了。'),
+                h('span', { style: S.dim }, rounds.status === 'loading' ? t('rounds.loading') : t('rounds.empty')),
               )
-            : rounds.rows.map((row, index) => h(RoundRow, { key: `${row.childId ?? 'row'}-${index}`, row })),
+            : rounds.rows.map((row, index) => h(RoundRow, { key: `${row.childId ?? 'row'}-${index}`, row, t })),
           rounds.rows.length > 0
             ? h('div', { style: S.footer },
-                h('span', { style: S.dim }, `这 ${rounds.rows.length} 次合计 ${moneyOf(spent)}`),
+                h('span', { style: S.dim }, t('rounds.total', { count: rounds.rows.length, usd: moneyOf(spent) })),
                 h('span', { style: S.spacer }),
-                h('span', { style: S.note }, '一个子代理一个会话，这里是它整段会话的合计'),
+                h('span', { style: S.note }, t('rounds.note')),
               )
             : null,
         ),
 
         h('details', null,
-          h('summary', { style: S.summary, title: state.path || '' }, '直接编辑 JSON'),
+          h('summary', { style: S.summary, title: state.path || '' }, t('json.edit')),
           h('textarea', {
             value: state.text,
             spellCheck: false,
@@ -402,25 +538,36 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /** The detail slot draws one entry on every plugin page; stay silent for other subjects. */
-    function RouteSection(props) {
-      let match = false
-      try {
-        match = JSON.stringify(props?.subject ?? null).includes('dsh-deepseek-model-route')
-      } catch {
-        match = false
-      }
-      return match ? h(RoutePanel) : null
-    }
-
     return {
-      inject: ['slots'],
+      inject: ['slots', 'locale'],
       apply(ctx) {
+        // 官方的调度：先 bind 拿到本命名空间的 t，再用 effect 注册字典——注册在 UI 挂载
+        // 之后也会被拾起，不需要重新挂载。bind 返回的函数每次调用都看当前语言，
+        // 所以它既能给 slot label 用，也能当组件里的兜底。
+        const t = ctx.locale.bind(NS)
+        ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dmr: dictionaries')
+
+        /**
+         * 详情槽在每个插件页都会渲染一次；不是本插件就返回 null。
+         * 文案优先用槽注入的 `t`（它随语言切换触发重渲染），没有就用上面那个绑定的。
+         */
+        const RouteSection = (props) => {
+          let match = false
+          try {
+            match = JSON.stringify(props?.subject ?? null).includes('dsh-deepseek-model-route')
+          } catch {
+            match = false
+          }
+          if (!match) return null
+          return h(RoutePanel, { t: typeof props?.t === 'function' ? props.t : t })
+        }
+
         ctx.slots.inject('plugins.detail.section', () => ctx.slots.register({
           name: 'plugins.detail.section',
           id: 'dmr-route',
           order: 40,
-          label: '模型路由',
+          label: () => t('nav'),
+          locale: NS,
         }, RouteSection))
       },
     }
