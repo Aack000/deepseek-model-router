@@ -251,10 +251,14 @@ window.__ModuleLoader__.load({
       const models = provider?.models ?? []
       const model = models.find((item) => item.id === entry.model)
       const efforts = model?.efforts ?? []
+      // preset 没有下拉：它取决于这份 DSH 里定义了哪些预设，写 JSON 才能表达清楚。
+      const preset = typeof entry.preset === 'string' && entry.preset.trim() !== '' ? entry.preset.trim() : null
       return h('div', { style: S.liner },
         h('div', { style: S.roleCell },
           h('span', { style: S.roleName }, t(`role.${role}`)),
-          h('span', { style: S.roleHint }, t(`role.${role}Hint`)),
+          h('span', { style: S.roleHint }, preset
+            ? `${t(`role.${role}Hint`)} · preset ${preset}`
+            : t(`role.${role}Hint`)),
         ),
         h('select', {
           style: S.select,
@@ -316,11 +320,12 @@ window.__ModuleLoader__.load({
       const actualText = actual?.model
         ? `${actual.provider ?? '?'}/${actual.model}${actual.effort ? ` @${actual.effort}` : ''}`
         : null
-      const title = actualText
+      const presetText = row.preset ? ` · preset ${row.preset}` : ''
+      const title = (actualText
         ? t('rounds.actualTitle', { actual: actualText, declared: declared ?? t('rounds.inherited') })
         : declared
           ? t('rounds.declaredTitle', { declared })
-          : t('rounds.inherited')
+          : t('rounds.inherited')) + presetText
       let costText
       let tokenText
       if (cost.status === 'ok') {

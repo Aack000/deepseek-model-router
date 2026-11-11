@@ -101,7 +101,11 @@ function readRoute(file, roleId) {
   // reviewer is often continued with send_message. Opting into `one-shot` is the
   // only way to get a child released as soon as it delivers.
   const lifecycle = entry.lifecycle === 'one-shot' ? 'one-shot' : 'continuable'
-  return { kind: 'pinned', provider, model, effort, lifecycle }
+  // Optional: run this child under a named agent preset (its own tool set, prompt
+  // sections, persona). Absent means DSH's default composition, which is what every
+  // role got before this field existed.
+  const preset = typeof entry.preset === 'string' && entry.preset.trim() !== '' ? entry.preset.trim() : undefined
+  return { kind: 'pinned', provider, model, effort, lifecycle, preset }
 }
 
 function describeRoute(route) {
@@ -218,18 +222,32 @@ function toolFor(ctx, role, file, provider, released) {
       // immediately, and the activation is owned by the runtime from then on.
       const signal = new AbortController().signal
 
-      const activation = await ctx.subagents.startActivation({
-        provider,
-        label: description || role.label,
-        request: {
-          prompt: [{ type: 'text', text: prompt }],
-          parent,
-          ...(agentOptions ? { agentOptions } : {}),
-          ...(typeof args?.cwd === 'string' && args.cwd.length > 0 ? { cwd: args.cwd } : {}),
-        },
-        signal,
-        delivery: 'parent',
-      })
+      let activation
+      try {
+        activation = await ctx.subagents.startActivation({
+          provider,
+          label: description || role.label,
+          request: {
+            prompt: [{ type: 'text', text: prompt }],
+            parent,
+            ...(agentOptions ? { agentOptions } : {}),
+            ...(typeof args?.cwd === 'string' && args.cwd.length > 0 ? { cwd: args.cwd } : {}),
+          },
+          // A preset name that does not exist fails here, and the runtime's own message
+          // does not say which role or which file asked for it.
+          ...(route.kind === 'pinned' && route.preset ? { agentPreset: route.preset } : {}),
+          signal,
+          delivery: 'parent',
+        })
+      } catch (error) {
+        // Only a preset failure gets rewritten: other failures carry codes (for example
+        // ACTIVATION_LIMIT_REACHED) that the model is expected to read and act on.
+        if (route.kind !== 'pinned' || !route.preset) throw error
+        throw new Error(
+          `DMR: cannot start ${role.tool} with agent preset "${route.preset}" — `
+          + `check roles.${role.id}.preset in ${file} (${error?.message ?? error})`,
+        )
+      }
 
       // 插件页的「最近委派」读这一行。它只是展示，写不进去也不该影响派活。
       recordRound(file, {
@@ -241,6 +259,7 @@ function toolFor(ctx, role, file, provider, released) {
         model: route.kind === 'pinned' ? route.model : null,
         effort: route.kind === 'pinned' ? route.effort : null,
         lifecycle: route.kind === 'pinned' ? route.lifecycle : 'continuable',
+        preset: route.kind === 'pinned' ? route.preset ?? null : null,
       })
 
       // `one-shot` releases the child as soon as it delivers, so a phase that only
@@ -386,6 +405,7 @@ function roundsRoute(file) {
         model: typeof round.model === 'string' ? round.model : null,
         effort: typeof round.effort === 'string' ? round.effort : null,
         lifecycle: typeof round.lifecycle === 'string' ? round.lifecycle : null,
+        preset: typeof round.preset === 'string' ? round.preset : null,
         // 这一轮是不是真的被 DMR 释放过：只报日志里记着的事，没记着就是 null。
         releasedAt: childId !== null && recent.released.has(childId) ? recent.released.get(childId) : null,
         cost: cost.status === 'ok'

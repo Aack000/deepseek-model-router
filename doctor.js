@@ -487,10 +487,11 @@ function checkProfile(rows, home, profileName) {
 function checkRole(rows, id, entry, catalog, why) {
   const route = `${entry.provider}/${entry.model}${entry.effort ? ` @${entry.effort}` : ''}`;
   const lifecycle = entry.lifecycle === 'one-shot' ? 'one-shot' : 'continuable';
+  const preset = typeof entry.preset === 'string' && entry.preset.trim() !== '' ? ` · preset ${entry.preset.trim()}` : '';
 
   if (catalog === null) {
     // 接口都没通时不逐行提醒：端口那一行已经说了原因，这里只标「没核对」。
-    rows.push(sub(id, 'skip', `${route} · ${lifecycle} · 未核对（${why}）`));
+    rows.push(sub(id, 'skip', `${route} · ${lifecycle}${preset} · 未核对（${why}）`));
     return;
   }
 
@@ -523,7 +524,7 @@ function checkRole(rows, id, entry, catalog, why) {
 
   // 目录里的 id 和界面上的显示名不是一回事，一起写出来省得对不上号。
   const shown = model.name && model.name !== model.id ? `（${model.name}）` : '';
-  rows.push(sub(id, 'ok', `${route}${shown} · ${lifecycle}`));
+  rows.push(sub(id, 'ok', `${route}${shown} · ${lifecycle}${preset}`));
 }
 
 function checkRouteTable(rows, home, catalog, why) {
