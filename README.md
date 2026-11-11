@@ -2,6 +2,8 @@
 
 分阶段模型路由，给 DeepSeek Harness 用。规划、实现、审查三个角色可以各有各的模型路由；每轮的**实际**模型和**实际**花费都从会话日志算出来，不按配置推断。
 
+> **v1.0.0（2026-11-11）** · 只在本机用 `link:` 安装，未发布 npm · 版本变化见 [CHANGELOG](CHANGELOG.md)
+
 > 前身是 Claude Code 插件 [claude-model-router](https://github.com/Aack000/claude-model-router)。思路保留，代码不搬：CMR 有一半代码在干 Claude Code 专属的活儿（改 `settings.json`、读写 CC Switch 的 sqlite、拼 `ANTHROPIC_DEFAULT_*_MODEL` 别名、解析 `~/.claude/projects` 的 transcript），这些在 DSH 里没有对应物，也不需要。
 
 ## 当前状态
@@ -80,6 +82,12 @@ node usage-audit.js --cost --since 2026-11-04
 ```
 
 模型列取自各子会话日志里**第一条** `request/header`，不是配置推断。三次合计 $0.0181，其中审查一次就 $0.0084——子代理是全额上下文，能自己判断的小改动别派活。
+
+## 姊妹项目
+
+[claude-model-router](https://github.com/Aack000/claude-model-router)（CMR）是这套思路的 Claude Code 版本：同样是「规划 / 实现 / 审查」三阶段分工、同样按实际模型核对，但模型是通过 CC Switch 卡片和 `ANTHROPIC_DEFAULT_*_MODEL` 别名钉住的，配置在 `settings.json` 与 preset 里；DMR 是它在 DeepSeek Harness 上的姊妹项目，模型改由 `$DSH_HOME/dmr.json` 决定（每次派活重读），多出面板和按会话日志计价。
+
+两边共享的是**问题**和**判断尺度**（什么时候该派子代理、什么时候主会话直接做更划算），不是代码：CMR 里改 `settings.json`、读 CC Switch 的 sqlite、解析 `~/.claude/projects` 的那些活在 DSH 里没有对应物，DMR 里读多帧 zstd、算分时价格的活 CMR 也没有。要移植，照的是思路，不是文件。
 
 ## 路线图
 
