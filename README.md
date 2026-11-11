@@ -16,7 +16,7 @@
 | `dmr.example.json` | 路由表示例，复制成 `$DSH_HOME/dmr.json` 后编辑 |
 | `route-check.js` | 角色归属 + 模型核对 + 每轮花费（`--cost`）。期望值取自**该次派活的声明路由**（工具把当时生效的路由写进返回文本），没有声明才回退到当前 `dmr.json`——改表不会误伤历史轮次，「声明 A 实际跑 B」照样抓得出 |
 | `doctor.js` | 一次回答「现在哪一环坏了」：安装链（包目录 / 两个入口 / 插件行 / 依赖 / bundle / node_modules 链接 / 是否被禁用）、`dmr.json` 与实时目录、会话日志、四个接口、以及运行中的进程是否比磁盘上的代码旧 |
-| `usage-audit.js` | token 汇总 + 美元计价 |
+| `usage-audit.js` | token 汇总 + 美元计价。`calls` 是**模型调用次数**（带 usage 的 `assistant/message`），`ctx` 是 `request/header`（上下文重置）次数——两者不是一回事，实测一条会话 `ctx=26`、`calls=474` |
 | `lib/session-log.js` | 多帧 zstd 结构解析（RFC 8878 帧头 + 块头，精确帧边界与截断判定） |
 | `lib/pricing.js` | 价表（$/百万 token）与分时计价 |
 | `lib/cost.js` | 单个会话的计价累计器 + 按会话 id 找日志；`route-check --cost` 和详情页共用这一份 |

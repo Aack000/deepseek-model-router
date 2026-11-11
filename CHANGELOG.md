@@ -15,6 +15,10 @@
 
 - 路由表的结构校验搬到 `lib/route-table.js`，面板的 `PUT /config` 与 `doctor.js` 共用一份；400 的错误话术保持不变。
 
+### 账本口径
+
+- `usage-audit.js` 的 `req` 改成两个字段：`calls`（带 usage 的 `assistant/message` 条数，真正的模型调用次数）与 `ctx`（`request/header` 条数，只表示上下文重置）。原来只显示 `ctx`，一条 474 次调用的会话会被读成 `req=26`，严重低估。
+
 ### 按角色换预设
 
 - `roles.<role>.preset`：这一路的子代理跑在某个 DSH 预设里（工具集、提示词段、persona 随预设），不写就是默认组合。
