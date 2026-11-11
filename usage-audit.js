@@ -53,7 +53,9 @@
  *   - <unreadable>：一个可解析事件都没有（0 字节 / 非 zstd / 全是坏行）；
  *     unknown：有事件但没有 request/header（例如只写了 session 头），所以没有模型信息。
  *   - 表格的 A(+N)：本会话还出现过 N 个**不同**模型（N = 不同模型数 - 1）；该行的
- *     req/in/out/cacheRead/cacheWrite 仍是**整个会话的合计，不是 A 这个模型的用量**。
+ *     calls/ctx/in/out/cacheRead/cacheWrite 仍是**整个会话的合计，不是 A 这个模型的用量**。
+ *   - calls = 带 usage 的 assistant/message 条数（真正的模型调用次数）；ctx = request/header
+ *     条数（上下文重置次数）。两者不是一回事：实测一条会话 ctx=26、calls=474。
  *   - --cost 的 $ 列：该会话的美元合计（同样不是某个模型的），TOTAL 行是全部会话的总价；
  *     金额 <$0.01 给 4 位小数，否则 2 位（$0.0012 / $1.50）；$ 后面带 * 表示该会话里有消息
  *     按 _default 估的价（价表里没有这个模型），表格下方会给一行说明。
@@ -262,7 +264,10 @@ function summarizeSession(file, root, sinceMs, cost) {
     model: null,
     models: [],
     events: 0,
-    req: 0,
+    // calls = 带 usage 的 assistant/message 条数，也就是模型调用次数；
+    // ctx  = request/header 条数，只表示上下文重置了几次，和调用次数无关。
+    calls: 0,
+    ctx: 0,
     in: 0,
     out: 0,
     cacheRead: 0,
@@ -296,7 +301,7 @@ function summarizeSession(file, root, sinceMs, cost) {
     }
 
     if (event.type === 'request/header') {
-      stats.req += 1;
+      stats.ctx += 1;
       const config = event.data && event.data.header && event.data.header.config;
       const model = config && config.model;
       if (typeof model === 'string' && model.trim() !== '') {
@@ -311,6 +316,7 @@ function summarizeSession(file, root, sinceMs, cost) {
     if (event.type === 'assistant/message') {
       const usage = event.data && event.data.usage;
       if (!usage || typeof usage !== 'object') continue; // 没有用量的消息跳过
+      stats.calls += 1;
       const inputTokens = toCount(usage.inputTokens);
       const outputTokens = toCount(usage.outputTokens);
       const cacheReadTokens = toCount(usage.cacheReadTokens);
@@ -363,7 +369,7 @@ function summarizeSession(file, root, sinceMs, cost) {
 }
 
 function emptyTotals() {
-  return { req: 0, in: 0, out: 0, cacheRead: 0, cacheWrite: 0, usd: 0 };
+  return { calls: 0, ctx: 0, in: 0, out: 0, cacheRead: 0, cacheWrite: 0, usd: 0 };
 }
 
 function summarize(files, root, sinceMs, cost) {
@@ -376,7 +382,8 @@ function summarize(files, root, sinceMs, cost) {
     const session = summarizeSession(file, root, sinceMs, cost);
     if (!session) continue;
     sessions.push(session);
-    total.req += session.req;
+    total.calls += session.calls;
+    total.ctx += session.ctx;
     total.in += session.in;
     total.out += session.out;
     total.cacheRead += session.cacheRead;
@@ -389,7 +396,7 @@ function summarize(files, root, sinceMs, cost) {
 }
 
 function formatRow(id, model, counts) {
-  return `${id}  ${model}  req=${counts.req}  in=${counts.in}  out=${counts.out}  cacheRead=${counts.cacheRead}  cacheWrite=${counts.cacheWrite}`;
+  return `${id}  ${model}  calls=${counts.calls}  ctx=${counts.ctx}  in=${counts.in}  out=${counts.out}  cacheRead=${counts.cacheRead}  cacheWrite=${counts.cacheWrite}`;
 }
 
 /** 表格里的金额：小于 $0.01 给 4 位小数（$0.0012），否则 2 位（$1.50）；TOTAL 同规则 */
@@ -441,7 +448,8 @@ function toJson(result, cost) {
       sessionId: session.sessionId,
       model: session.model,
       models: session.models,
-      req: session.req,
+      calls: session.calls,
+      ctx: session.ctx,
       in: session.in,
       out: session.out,
       cacheRead: session.cacheRead,
@@ -449,7 +457,8 @@ function toJson(result, cost) {
       ...(cost ? { usd: roundUsd(session.usd) } : {}),
     })),
     total: {
-      req: result.total.req,
+      calls: result.total.calls,
+      ctx: result.total.ctx,
       in: result.total.in,
       out: result.total.out,
       cacheRead: result.total.cacheRead,
