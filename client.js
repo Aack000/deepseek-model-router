@@ -66,7 +66,7 @@ window.__ModuleLoader__.load({
       'rounds.released': '已释放',
       'rounds.releasedAt': '释放于 {time}',
       'rounds.total': '这 {count} 次合计 {usd}',
-      'rounds.note': '一个子代理一个会话，这里是它整段会话的合计',
+      'rounds.note': '一个子代理一个会话，这里是它整段会话的合计；读不出的行不计入',
       'json.edit': '直接编辑 JSON',
       'foot.config': '配置在 $DSH_HOME/dmr.json，改完下一个子代理生效。',
       'foot.check': '核对：node doctor.js · node route-check.js --cost',
@@ -124,7 +124,7 @@ window.__ModuleLoader__.load({
       'rounds.released': 'released',
       'rounds.releasedAt': 'released at {time}',
       'rounds.total': 'Shown: {count} · total {usd}',
-      'rounds.note': 'One subagent, one session; this is its whole session',
+      'rounds.note': 'One subagent, one session; unreadable rows are not counted',
       'json.edit': 'Edit the JSON directly',
       'foot.config': 'Config lives in $DSH_HOME/dmr.json; an edit applies to the next subagent.',
       'foot.check': 'Check: node doctor.js · node route-check.js --cost',
@@ -238,7 +238,10 @@ window.__ModuleLoader__.load({
 
     function withRole(text, role, patch) {
       const parsed = parse(text)
-      const table = parsed.table ?? { roles: {} }
+      // 文本已经是坏 JSON 时什么都不改：以前兜底成 {roles:{}}，用户改到一半的
+      // 内容会被一次下拉点击整张覆盖。
+      if (parsed.error) return text
+      const table = parsed.table
       const roles = { ...(table.roles ?? {}) }
       const next = { ...(roles[role] ?? {}), ...patch }
       for (const key of Object.keys(next)) if (next[key] === undefined) delete next[key]
@@ -570,13 +573,11 @@ window.__ModuleLoader__.load({
          * 文案优先用槽注入的 `t`（它随语言切换触发重渲染），没有就用上面那个绑定的。
          */
         const RouteSection = (props) => {
-          let match = false
-          try {
-            match = JSON.stringify(props?.subject ?? null).includes('dsh-deepseek-model-route')
-          } catch {
-            match = false
-          }
-          if (!match) return null
+          // 插件页的 subject 是 { kind: 'bundle', pkg: { name } }；行页是
+          // { kind: 'row', pkg }，也带包名——行页不该再重复一整块面板。
+          const subject = props?.subject
+          const ours = subject?.pkg?.name === 'dsh-deepseek-model-route' && subject?.kind !== 'row'
+          if (!ours) return null
           return h(RoutePanel, { t: typeof props?.t === 'function' ? props.t : t })
         }
 
