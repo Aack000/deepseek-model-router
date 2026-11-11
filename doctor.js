@@ -264,6 +264,7 @@ function checkPackage(rows) {
 function checkLocales(pkg) {
   const problems = [];
   const titles = [];
+  const details = [];
 
   for (const lang of ['zh', 'en']) {
     const file = path.join(PKG_DIR, 'locale', `${lang}.json`);
@@ -279,11 +280,31 @@ function checkLocales(pkg) {
       problems.push(`locale/${lang}.json 不是合法 JSON`);
       continue;
     }
-    const title = parsed && parsed.meta && parsed.meta.title;
+    const meta = parsed && typeof parsed.meta === 'object' && parsed.meta !== null ? parsed.meta : {};
+    const title = meta.title;
     if (typeof title !== 'string' || title.trim() === '') {
       problems.push(`locale/${lang}.json 没有 meta.title`);
     } else {
       titles.push(`${lang}: ${title}`);
+    }
+
+    // 插件页正文：`meta.detail` 指向包内的 Markdown，规则与宿主一致。写错或缺文件时，
+    // 那一页会直接显示错误，而不是退回 README——所以在这里拦。
+    if (meta.detail !== undefined) {
+      const detail = meta.detail;
+      const bad = typeof detail !== 'string'
+        || detail.trim() === ''
+        || detail.includes('\\')
+        || /^[A-Za-z][A-Za-z\d+.-]*:/.test(detail)
+        || detail.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
+        || !/\.(md|markdown)$/i.test(detail);
+      if (bad) {
+        problems.push(`locale/${lang}.json 的 meta.detail 不是包内的 Markdown 相对路径`);
+      } else if (!fs.existsSync(path.join(PKG_DIR, detail))) {
+        problems.push(`meta.detail 指向的 ${detail} 不存在`);
+      } else {
+        details.push(`${lang} → ${detail}`);
+      }
     }
   }
 
@@ -300,8 +321,9 @@ function checkLocales(pkg) {
     problems.push('dsh.client.inject 里没有 @deepseek-ai/dsh-client-locale');
   }
 
+  const detailText = details.length > 0 ? ` · 正文 ${details.join(' / ')}` : '';
   return problems.length === 0
-    ? sub('locale 资源', 'ok', titles.join(' · '))
+    ? sub('locale 资源', 'ok', `${titles.join(' · ')}${detailText}`)
     : sub('locale 资源', 'fail', problems.join('；'), '插件列表的标题/说明和面板文案都靠它');
 }
 
