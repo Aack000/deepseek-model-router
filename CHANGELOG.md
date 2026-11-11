@@ -17,7 +17,7 @@
 
 ### 账本口径
 
-- `usage-audit.js` 的 `req` 改成两个字段：`calls`（带 usage 的 `assistant/message` 条数，真正的模型调用次数）与 `ctx`（`request/header` 条数，只表示上下文重置）。原来只显示 `ctx`，一条 474 次调用的会话会被读成 `req=26`，严重低估。
+- `usage-audit.js` 与 `route-check.js` 的 `req` 都改成两个字段：`calls`（带 usage 的 `assistant/message` 条数，真正的模型调用次数）与 `ctx`（`request/header` 条数，只表示上下文重置）。原来只显示 `ctx`，一条 474 次调用的会话会被读成 `req=26`，严重低估；子会话里 `ctx` 通常只有 1，按它看成本会差一个量级。
 
 ### 按角色换预设
 

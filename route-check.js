@@ -488,7 +488,10 @@ function summarizeChild(entry, withCost = false) {
     return null;
   }
 
-  let req = 0;
+  // calls = 带 usage 的 assistant/message 条数（模型调用次数）；ctx = request/header 条数
+  // （上下文重置次数）。子会话里 ctx 往往只有 1，拿它当调用次数会把成本看小一个量级。
+  let calls = 0;
+  let ctx = 0;
   let input = 0;
   let output = 0;
   let header = null;
@@ -498,13 +501,14 @@ function summarizeChild(entry, withCost = false) {
     if (!event || typeof event !== 'object') continue;
     if (costState !== null) costAdd(costState, event);
     if (event.type === 'request/header') {
-      req += 1;
+      ctx += 1;
       if (header === null) header = event;
       continue;
     }
     if (event.type === 'assistant/message') {
       const usage = event.data && event.data.usage;
       if (!usage || typeof usage !== 'object') continue;
+      calls += 1;
       input += toCount(usage.inputTokens);
       output += toCount(usage.outputTokens);
     }
@@ -521,7 +525,8 @@ function summarizeChild(entry, withCost = false) {
       model,
       provider: config && typeof config.provider === 'string' ? config.provider.trim() : '',
       effort: config && typeof config.reasoningEffort === 'string' ? config.reasoningEffort : null,
-      req,
+      calls,
+      ctx,
       in: input,
       out: output,
     },
@@ -571,7 +576,9 @@ function evaluate(rows, entries, parentEntry, expect, explicitExpect, withCost =
       child: row.child,
       model: null,
       effort: null,
-      req: null,
+      // 调用次数与上下文重置次数分开：表格只显示 calls，ctx 留给 JSON。
+      calls: null,
+      ctx: null,
       in: null,
       out: null,
       expected,
@@ -621,7 +628,8 @@ function evaluate(rows, entries, parentEntry, expect, explicitExpect, withCost =
     const info = child.info;
     base.model = info.model;
     base.effort = info.effort;
-    base.req = info.req;
+    base.calls = info.calls;
+    base.ctx = info.ctx;
     base.in = info.in;
     base.out = info.out;
     base.status = 'started';
@@ -751,14 +759,14 @@ function statusMark(row) {
 }
 
 function printTable(parentId, rows, summary, cost = null) {
-  const header = ['角色', '工具', '子会话', '模型', 'effort', 'req', 'in', 'out', '判定'];
+  const header = ['角色', '工具', '子会话', '模型', 'effort', 'calls', 'in', 'out', '判定'];
   const cells = rows.map((row) => [
     row.roleLabel,
     row.tool,
     row.child === null ? '-' : row.child.slice(0, 8),
     row.model === null ? '-' : row.model,
     row.effort === null ? '-' : row.effort,
-    row.req === null ? '-' : String(row.req),
+    row.calls === null ? '-' : String(row.calls),
     row.in === null ? '-' : String(row.in),
     row.out === null ? '-' : String(row.out),
     statusMark(row),
@@ -806,7 +814,8 @@ function toJson(parentId, rows, summary, cost = null) {
       child: row.child,
       model: row.model === null ? 'unknown' : row.model,
       effort: row.effort,
-      req: row.req,
+      calls: row.calls,
+      ctx: row.ctx,
       in: row.in,
       out: row.out,
       expected: row.expected,

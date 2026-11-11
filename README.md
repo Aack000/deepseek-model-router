@@ -73,7 +73,7 @@ node usage-audit.js --cost --since 2026-11-04
 一次实测（2026-11-04，同一会话、standard preset；当时规划与审查放在 pro 上，现在默认全用 flash）：
 
 ```
-角色  工具             子会话    模型             effort  req  in     out  判定  $
+角色  工具             子会话    模型             effort  calls  in     out  判定  $
 规划  plan_subagent    95de324b  deepseek-v4-pro  max     1    11638  388  ✓     $0.0084
 实现  impl_subagent    d1fc7b84  deepseek-flash   high    1    8745   2    ✓     $0.0013
 审查  review_subagent  cb825c54  deepseek-v4-pro  max     1    11944  149  ✓     $0.0084
