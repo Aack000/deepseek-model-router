@@ -98,9 +98,7 @@ GET /models → deepseek-account: deepseek-flash, deepseek-v4-pro (efforts: off,
 PUT /config 合法 → 200；坏 JSON → 400；角色名 typo → 400；磁盘文件保持完好
 ```
 
-> 首次安装后 client 半需要**重启 DSH**：client 模块表是启动时扫描 `dsh.client` 建的。host 侧（三个工具 + 两个接口）装完即生效。
-
-还没做：locale 资源（页面文案目前是内联中文）。
+> 首次安装后 client 半需要**重启 DSH**：client 模块表是启动时扫描 `dsh.client` 建的。host 侧（三个工具 + 四个接口）装完即生效。
 
 ### v3：子代理生命周期（已完成）
 
@@ -123,10 +121,9 @@ DMR 不做「关闭按钮」（删不掉目录条目，做出来是假功能）�
 
 **释放不等于不能用**：实测对一个已释放的 `one-shot` 子代理发 `send_message`，冷恢复成功并正常回复；它按**当时记录的** provider/model/effort（flash @high）发请求，不是按当前 `dmr.json` 走——所以之后改表不会让一个已存在的子代理换模型。
 
-### v3 之后
+### 还没做的可选项
 
-- locale 资源（页面文案目前内联中文）
-- 可选：按角色配 `agentPreset`，让审查子代理拿到只读的工具集
+- 按角色配 `agentPreset`，让审查子代理拿到只读的工具集（现在三个角色的工具集相同，只靠 prompt 约束「审查不许改文件」）
 
 ### v4：最近委派（已完成）
 
@@ -145,7 +142,7 @@ DMR 不做「关闭按钮」（删不掉目录条目，做出来是假功能）�
 
 DSH 自带官方 locale（`@deepseek-ai/dsh-client-locale`，随包提供 en / zh / ja / es / fr / de / ru / pt 八种语言，在「设置 → 通用 → 语言」里切），面板跟着它走，不再是内联中文：
 
-- 命名空间 `dsh-deepseek-model-route`，注册 `{ zh, en }` 两套字典（官方要求基线语言成对；53 个 key 一一对应，缺 key 会退回显示 key 本身）
+- 命名空间 `dsh-deepseek-model-route`，注册 `{ zh, en }` 两套字典（官方要求基线语言成对；54 个 key 一一对应，缺 key 会退回显示 key 本身）
 - 组件用槽注入的 `t`（注册时声明 `locale: NS`），切换语言即时生效、不用刷新；槽没给 `t` 时回落到 `ctx.locale.bind(NS)`（它每次调用都看当前语言），所以不会把 key 漏到界面上
 - 其余六种语言按官方的 fallback 链落到英文；数字、金额、`@effort` 这些保持原样，只有界面文案跟着变
 - 插件列表里的标题与说明放在 `locale/zh.json` / `locale/en.json` 的 `meta` 里（官方就是这样给已安装插件做本地化的），`package.json` 导出 `./locale/*.json`，`dsh.client.inject` 里加上 locale 包
