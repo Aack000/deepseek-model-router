@@ -6,7 +6,7 @@
 
 ### 新增
 
-- `doctor.js`：一次回答「现在哪一环坏了」——包目录与两个入口、bundle patch 里那行插件、profile 的依赖声明 / bundle 列表 / `node_modules` 链接指向 / 有没有被 `disabled: true`、`dmr.json` 与实时模型目录、会话日志、四个接口。只读，不改任何文件。
+- `doctor.js`：一次回答「现在哪一环坏了」——包目录与两个入口、bundle patch 里那行插件、`locale/*.json` 的 meta 与导出、profile 的依赖声明 / bundle 列表 / `node_modules` 链接指向 / 有没有被 `disabled: true`、`dmr.json` 与实时模型目录、会话日志、四个接口。只读，不改任何文件。
 - 端口自动发现：扫本机 LISTENING 端口，用 `/config` 的**响应形状**（`{path, exists, text}`）认端口，不只看状态码——实测本机有别的程序对任意路径都回 200。也可 `--port` 直接指定。
 - 「运行中的代码」：比对 `index.mjs` / `client.js` 的 mtime 与 DSH 进程启动时间，改了但没重装 / 没重启会提醒。
 - `--json` 输出与 0 / 1 / 2 退出码，风格与 `route-check.js` 一致。

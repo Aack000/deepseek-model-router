@@ -4,12 +4,13 @@
 
 > 前身是 Claude Code 插件 [claude-model-router](https://github.com/Aack000/claude-model-router)。思路保留，代码不搬：CMR 有一半代码在干 Claude Code 专属的活儿（改 `settings.json`、读写 CC Switch 的 sqlite、拼 `ANTHROPIC_DEFAULT_*_MODEL` 别名、解析 `~/.claude/projects` 的 transcript），这些在 DSH 里没有对应物，也不需要。
 
-## 当前状态：v4
+## 当前状态
 
 | 部件 | 作用 |
 |---|---|
 | `index.mjs` | host 插件：注册 `plan_subagent` / `impl_subagent` / `review_subagent`，**每次调用读一遍 `dmr.json`** 决定子代理的 provider/model/effort；另提供插件详情页用的四个接口 |
 | `client.js` | client 插件：注册到 `plugins.detail.section`，在**插件自己的详情页**里画路由表和「最近委派」；文案跟随 DSH 的界面语言（zh / en） |
+| `locale/` | 插件列表里的标题与说明（`meta`），zh / en 各一份（包内面板的文案在 `client.js` 的字典里） |
 | `cordis.patch.yml` | 一行 host 平面插件行（**没有 preset**，见下） |
 | `dmr.example.json` | 路由表示例，复制成 `$DSH_HOME/dmr.json` 后编辑 |
 | `route-check.js` | 角色归属 + 模型核对 + 每轮花费（`--cost`）。期望值取自**该次派活的声明路由**（工具把当时生效的路由写进返回文本），没有声明才回退到当前 `dmr.json`——改表不会误伤历史轮次，「声明 A 实际跑 B」照样抓得出 |
@@ -32,12 +33,14 @@
 ```json
 {
   "roles": {
-    "plan":   { "provider": "deepseek-account", "model": "deepseek-v4-pro", "effort": "max" },
-    "impl":   { "provider": "deepseek-account", "model": "deepseek-flash",  "effort": "high" },
-    "review": { "provider": "deepseek-account", "model": "deepseek-v4-pro", "effort": "max" }
+    "plan":   { "provider": "deepseek-account", "model": "deepseek-flash", "effort": "max" },
+    "impl":   { "provider": "deepseek-account", "model": "deepseek-flash", "effort": "high", "lifecycle": "one-shot" },
+    "review": { "provider": "deepseek-account", "model": "deepseek-flash", "effort": "max" }
   }
 }
 ```
+
+（`deepseek-v4-pro` 是 flash 的 4.4 倍价。真要更强的规划/审查，把这行的 model 换过去即可；同一轮可以混用。）
 
 - 文件不存在、或某个角色没有条目 → 该子代理**继承父会话的路由**（不会报错，等同于普通 `subagent`）
 - 文件存在但**不是合法 JSON** → 派活直接报错并指出文件路径（静默退回会让整轮跑错模型而没人知道）
@@ -63,7 +66,7 @@ node usage-audit.js --cost --since 2026-11-04
 `doctor` 退出码：没有 ✗ → 0，有 ✗ → 1，参数错误 → 2；`!` 只是提醒，不影响退出码。端口默认从本机监听端口里**按 `/config` 的响应形状**认出来（GUI 端口每次重启都变），也可以用 `--port` 直接指定。
 `route-check` 退出码：全部符合 → 0，有 ✗ → 1。`usage-audit`：正常 0 / 目录不存在 1 / 参数错误 2。
 
-一次实测（同一会话、standard preset、未建 preset）：
+一次实测（2026-11-04，同一会话、standard preset；当时规划与审查放在 pro 上，现在默认全用 flash）：
 
 ```
 角色  工具             子会话    模型             effort  req  in     out  判定  $
@@ -72,11 +75,11 @@ node usage-audit.js --cost --since 2026-11-04
 审查  review_subagent  cb825c54  deepseek-v4-pro  max     1    11944  149  ✓     $0.0084
 ```
 
-模型列取自各子会话日志里**第一条** `request/header`，不是配置推断。
+模型列取自各子会话日志里**第一条** `request/header`，不是配置推断。三次合计 $0.0181，其中审查一次就 $0.0084——子代理是全额上下文，能自己判断的小改动别派活。
 
 ## 路线图
 
-### v2：设置页（已完成）
+### v2：配置面板（已完成）
 
 Plugins 详情页里 **DeepSeek Model Route** 自己那一页（`plugins.detail.section`，不是 Settings 的标签页）：
 
@@ -157,7 +160,7 @@ DSH 自带官方 locale（`@deepseek-ai/dsh-client-locale`，随包提供 en / z
 | 段 | 查什么 |
 |---|---|
 | 环境 | `DSH_HOME` 在不在、能不能读 |
-| 安装 | 包目录、`main` 与 `exports["./client"]` 指向的文件、bundle patch 里那行 `id: dmr-delegation`、profile 的 `dependencies` 与 `dsh.profile.bundles`、`node_modules` 链接**指向何处**、profile 的 `cordis.patch.yml` / `cordis.yml` 有没有把它 `disabled: true`、还有没有别的断链 |
+| 安装 | 包目录、`main` 与 `exports["./client"]` 指向的文件、bundle patch 里那行 `id: dmr-delegation`、`locale/zh.json` 与 `en.json` 的 `meta` 及 `./locale/*.json` 导出（宿主读不到就退回包名）、profile 的 `dependencies` 与 `dsh.profile.bundles`、`node_modules` 链接**指向何处**、profile 的 `cordis.patch.yml` / `cordis.yml` 有没有把它 `disabled: true`、还有没有别的断链 |
 | 配置 | `dmr.json` 是否存在·合法（与面板共用 `lib/route-table.js` 的校验），每个角色的 provider/model/effort 是否在**实时目录**里；顺手报「最近委派」日志的行数 |
 | 会话日志 | `sessions/` 可读吗、多少条日志、最近一条的时间、头 4 字节是不是 zstd 魔数 |
 | 接口 | 端口（默认扫本机监听端口，按 `/config` 的响应形状认，不只看状态码）、四个接口的状态与耗时、`/config` 与 `/rounds` 读的文件是否和 `--home` 一致、磁盘上的 `index.mjs` / `client.js` 是否比运行中的进程更新 |
@@ -201,4 +204,4 @@ plugin_manager remove_bundle  dsh-deepseek-model-route
 plugin_manager install_bundle E:\code\program\deepseek-model-router
 ```
 
-重装后工具立刻可用；**设置页里的面板要重启 DSH** 才会回来（client 模块在启动时扫描）。doctor 的「运行中的代码」那一行会用进程启动时间和文件 mtime 比对，晚于进程启动就会提醒你重启。
+重装后工具立刻可用；**插件详情页里的面板要重启 DSH** 才会回来（client 模块在启动时扫描）。doctor 的「运行中的代码」那一行会用进程启动时间和文件 mtime 比对，晚于进程启动就会提醒你重启。
