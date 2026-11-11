@@ -20,6 +20,7 @@
 - 面板文案接入官方的 `@deepseek-ai/dsh-client-locale`：命名空间 `dsh-deepseek-model-route`，注册 `{ zh, en }` 两套字典；语言跟随「设置 → 通用」，其余六种语言回落英文。
 - 组件用槽注入的 `t`（注册时声明 `locale: NS`），切换语言即时生效；槽没给 `t` 时回落到 `ctx.locale.bind(NS)`，不会显示 key。
 - 插件列表的标题与说明改由 `locale/zh.json`、`locale/en.json` 的 `meta` 提供；`package.json` 增加 `./locale/*.json` 导出、`dsh.client.inject` 加上 locale 包，`description` 改为英文（中文在 `locale/zh.json`）。
+- 插件详情页正文改用 `meta.detail`（zh → `docs/page.zh.md`，en → `docs/page.md`）：那一页不再铺整篇 README，只留「三个工具 / 路由表 / 怎么核对」三段，下面的设置表格一屏就能看到。`version` 提到 0.1.1——宿主按 `包名@版本` 缓存文档，不升版本就不会刷新。
 
 ### 「最近委派」的已释放标记
 

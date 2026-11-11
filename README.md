@@ -10,7 +10,8 @@
 |---|---|
 | `index.mjs` | host 插件：注册 `plan_subagent` / `impl_subagent` / `review_subagent`，**每次调用读一遍 `dmr.json`** 决定子代理的 provider/model/effort；另提供插件详情页用的四个接口 |
 | `client.js` | client 插件：注册到 `plugins.detail.section`，在**插件自己的详情页**里画路由表和「最近委派」；文案跟随 DSH 的界面语言（zh / en） |
-| `locale/` | 插件列表里的标题与说明（`meta`），zh / en 各一份（包内面板的文案在 `client.js` 的字典里） |
+| `locale/` | 插件列表里的标题与说明（`meta`），以及插件详情页正文的指向（`meta.detail` → `docs/page.md` / `docs/page.zh.md`）；包内面板的文案在 `client.js` 的字典里 |
+| `docs/page*.md` | 插件详情页的正文，中英各一份，刻意留短：那一页要能一眼看到下面的路由表 |
 | `cordis.patch.yml` | 一行 host 平面插件行（**没有 preset**，见下） |
 | `dmr.example.json` | 路由表示例，复制成 `$DSH_HOME/dmr.json` 后编辑 |
 | `route-check.js` | 角色归属 + 模型核对 + 每轮花费（`--cost`）。期望值取自**该次派活的声明路由**（工具把当时生效的路由写进返回文本），没有声明才回退到当前 `dmr.json`——改表不会误伤历史轮次，「声明 A 实际跑 B」照样抓得出 |
@@ -146,6 +147,8 @@ DSH 自带官方 locale（`@deepseek-ai/dsh-client-locale`，随包提供 en / z
 - 组件用槽注入的 `t`（注册时声明 `locale: NS`），切换语言即时生效、不用刷新；槽没给 `t` 时回落到 `ctx.locale.bind(NS)`（它每次调用都看当前语言），所以不会把 key 漏到界面上
 - 其余六种语言按官方的 fallback 链落到英文；数字、金额、`@effort` 这些保持原样，只有界面文案跟着变
 - 插件列表里的标题与说明放在 `locale/zh.json` / `locale/en.json` 的 `meta` 里（官方就是这样给已安装插件做本地化的），`package.json` 导出 `./locale/*.json`，`dsh.client.inject` 里加上 locale 包
+- **插件详情页的正文不再用 README**：`meta.detail` 指向 `docs/page.zh.md` / `docs/page.md`（宿主读包内 Markdown，找不到就退回 README）。README 留长文给仓库，插件页只放三段：工具、路由表、怎么核对
+- 改完 `docs/page*.md` 或 `meta.detail` 要**升 `version`**：宿主按 `包名@版本` 缓存文档，不升版本打开还是旧的那份
 - 改了 `client.js` 仍然要重启 DSH：client 模块表是启动时扫的
 
 实测（2026-11-11）：用最小 hooks 替身把 `client.js` 在 Node 里渲染两遍——`en` 那份文本里没有任何 CJK 字符、`zh` 那份全是中文，两边「已释放 / released」都只出现一次，没有 key 泄漏；槽不给 `t` 时回落到中文，同样不漏 key。
@@ -157,7 +160,7 @@ DSH 自带官方 locale（`@deepseek-ai/dsh-client-locale`，随包提供 en / z
 | 段 | 查什么 |
 |---|---|
 | 环境 | `DSH_HOME` 在不在、能不能读 |
-| 安装 | 包目录、`main` 与 `exports["./client"]` 指向的文件、bundle patch 里那行 `id: dmr-delegation`、`locale/zh.json` 与 `en.json` 的 `meta` 及 `./locale/*.json` 导出（宿主读不到就退回包名）、profile 的 `dependencies` 与 `dsh.profile.bundles`、`node_modules` 链接**指向何处**、profile 的 `cordis.patch.yml` / `cordis.yml` 有没有把它 `disabled: true`、还有没有别的断链 |
+| 安装 | 包目录、`main` 与 `exports["./client"]` 指向的文件、bundle patch 里那行 `id: dmr-delegation`、`locale/zh.json` 与 `en.json` 的 `meta`（标题、说明、`detail` 指向的正文文件）及 `./locale/*.json` 导出（宿主读不到就退回包名）、profile 的 `dependencies` 与 `dsh.profile.bundles`、`node_modules` 链接**指向何处**、profile 的 `cordis.patch.yml` / `cordis.yml` 有没有把它 `disabled: true`、还有没有别的断链 |
 | 配置 | `dmr.json` 是否存在·合法（与面板共用 `lib/route-table.js` 的校验），每个角色的 provider/model/effort 是否在**实时目录**里；顺手报「最近委派」日志的行数 |
 | 会话日志 | `sessions/` 可读吗、多少条日志、最近一条的时间、头 4 字节是不是 zstd 魔数 |
 | 接口 | 端口（默认扫本机监听端口，按 `/config` 的响应形状认，不只看状态码）、四个接口的状态与耗时、`/config` 与 `/rounds` 读的文件是否和 `--home` 一致、磁盘上的 `index.mjs` / `client.js` 是否比运行中的进程更新 |
