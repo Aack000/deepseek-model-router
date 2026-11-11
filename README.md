@@ -189,6 +189,7 @@ profile desktop      ✓     C:\Users\yx\.dsh\profiles\desktop
 - **`subagent_fork` 不参与**：fork 子代理继承父会话路由以复用 KV cache，钉模型没有意义。
 - **`route-check` 的自动选父会话**只认三个角色工具；只有通用 `subagent` 的会话要用 `--parent` 指定。
 - **工具不是线程安全的**：`isConcurrencySafe` 返回 false，同一时刻只跑一个派活，避免两个包同时改同一批文件。
+- **`/rounds` 是同步解压**：每行子会话日志（单文件上限 48MB）都在宿主线程上解压，日志很大时那一次请求会卡住几秒；只影响面板加载，不影响派活。
 - **`doctor` 的端口发现**是扫本机 LISTENING 端口再按响应形状认；同一台机器上跑多个 DSH 实例时优先选「读的正是 `--home` 那份 `dmr.json`」的那个，都读同一份时按端口号取小的。非 Windows 上进程启动时间靠 `ps -o etimes=`，拿不到就跳过那一行。
 
 ## 运维注意

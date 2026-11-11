@@ -15,6 +15,15 @@
 
 - 路由表的结构校验搬到 `lib/route-table.js`，面板的 `PUT /config` 与 `doctor.js` 共用一份；400 的错误话术保持不变。
 
+### 审查后的修复
+
+- `PUT /config` 要求 `content-type: application/json`：跨站的 `text/plain` POST 不能再改写路由表；写盘改成「临时文件 + rename」，崩溃不会留下半个 `dmr.json`。
+- 面板在 JSON 非法时动下拉不再覆盖用户正在编辑的文本（以前会兜底成空表）。
+- effort 校验不再被自己的 `catch` 吞掉（以前写错 effort 根本不报）；`resolveModelInfo` 失败会带角色名和文件路径报错。
+- 面板只在包页（`kind: 'bundle'`）渲染，行页不再重复整块面板。
+- `provider` / `model` / `effort` 读取时自动 trim。
+- `/rounds` 计算花费时用 `DSH_HOME` 定位会话日志，不再假设 `dmr.json` 就在 DSH_HOME 里；rounds 日志裁剪也改成原子写。
+
 ### 账本口径
 
 - `usage-audit.js` 与 `route-check.js` 的 `req` 都改成两个字段：`calls`（带 usage 的 `assistant/message` 条数，真正的模型调用次数）与 `ctx`（`request/header` 条数，只表示上下文重置）。原来只显示 `ctx`，一条 474 次调用的会话会被读成 `req=26`，严重低估；子会话里 `ctx` 通常只有 1，按它看成本会差一个量级。
