@@ -135,7 +135,8 @@ window.__ModuleLoader__.load({
     const ROUND_GRID = '64px minmax(150px,1fr) 84px minmax(150px,1.1fr) 52px'
     const S = {
       section: {
-        marginTop: 28, paddingTop: 20, borderTop: '1px solid rgba(127,127,127,.22)',
+        // 上一段（来源信息）本身有下边距，这里再留 28 就成了两块空白；10 只够让分隔线不贴字。
+        marginTop: 10, paddingTop: 12, borderTop: '1px solid rgba(127,127,127,.22)',
         display: 'flex', flexDirection: 'column', gap: 14, color: 'inherit',
       },
       title: { fontSize: 15, fontWeight: 600, letterSpacing: '.01em' },

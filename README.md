@@ -11,7 +11,7 @@
 | `index.mjs` | host 插件：注册 `plan_subagent` / `impl_subagent` / `review_subagent`，**每次调用读一遍 `dmr.json`** 决定子代理的 provider/model/effort；另提供插件详情页用的四个接口 |
 | `client.js` | client 插件：注册到 `plugins.detail.section`，在**插件自己的详情页**里画路由表和「最近委派」；文案跟随 DSH 的界面语言（zh / en） |
 | `locale/` | 插件列表里的标题与说明（`meta`），以及插件详情页正文的指向（`meta.detail` → `docs/page.md` / `docs/page.zh.md`）；包内面板的文案在 `client.js` 的字典里 |
-| `docs/page*.md` | 插件详情页的正文，中英各一份，各一句：其余说明放在面板最底下，别把设置挤到下面 |
+| `docs/page*.md` | 插件详情页的正文，中英各一份，**留空**：一句介绍在标题下面（`meta.description`），其余说明在面板最底下，别把设置挤下去 |
 | `cordis.patch.yml` | 一行 host 平面插件行（**没有 preset**，见下） |
 | `dmr.example.json` | 路由表示例，复制成 `$DSH_HOME/dmr.json` 后编辑 |
 | `route-check.js` | 角色归属 + 模型核对 + 每轮花费（`--cost`）。期望值取自**该次派活的声明路由**（工具把当时生效的路由写进返回文本），没有声明才回退到当前 `dmr.json`——改表不会误伤历史轮次，「声明 A 实际跑 B」照样抓得出 |
@@ -147,7 +147,7 @@ DSH 自带官方 locale（`@deepseek-ai/dsh-client-locale`，随包提供 en / z
 - 组件用槽注入的 `t`（注册时声明 `locale: NS`），切换语言即时生效、不用刷新；槽没给 `t` 时回落到 `ctx.locale.bind(NS)`（它每次调用都看当前语言），所以不会把 key 漏到界面上
 - 其余六种语言按官方的 fallback 链落到英文；数字、金额、`@effort` 这些保持原样，只有界面文案跟着变
 - 插件列表里的标题与说明放在 `locale/zh.json` / `locale/en.json` 的 `meta` 里（官方就是这样给已安装插件做本地化的），`package.json` 导出 `./locale/*.json`，`dsh.client.inject` 里加上 locale 包
-- **插件详情页的正文不再用 README**：`meta.detail` 指向 `docs/page.zh.md` / `docs/page.md`（宿主读包内 Markdown，找不到就退回 README），正文只有一句「各走各的模型，下面是当前设置」，其余说明（配置在哪、怎么核对）收在面板最底下两行
+- **插件详情页的正文不再用 README**：`meta.detail` 指向 `docs/page.zh.md` / `docs/page.md`（宿主读包内 Markdown，找不到就退回 README），这两份正文**故意留空**——介绍只保留标题下那一句（`meta.description`），其余说明（配置在哪、怎么核对）收在面板最底下两行
 - 插件页的区块顺序是 DSH 定的：正文 → 工具行 → 来源信息 → 插件自己的区块。插件只能控制「正文」和「最底下那块」，没法把面板挪到来源信息之前
 - 改完 `docs/page*.md` 或 `meta.detail` 要**升 `version`**：宿主按 `包名@版本` 缓存文档，不升版本打开还是旧的那份
 - 改了 `client.js` 仍然要重启 DSH：client 模块表是启动时扫的

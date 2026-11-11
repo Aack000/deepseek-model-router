@@ -1,1 +1,1 @@
-One model per phase; the table below is the live setting.
+<!-- Intentionally empty: the one-line intro sits under the title; the rest lives in the panel. -->
