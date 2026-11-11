@@ -76,6 +76,8 @@ window.__ModuleLoader__.load({
       },
       num: { fontVariantNumeric: 'tabular-nums', fontSize: 12.5 },
       dim: { fontSize: 11.5, opacity: 0.6 },
+      clock: { display: 'flex', flexDirection: 'column', gap: 2 },
+      released: { fontSize: 10.5, color: '#3c9d5d', whiteSpace: 'nowrap' },
     }
 
     // ── 数据 ────────────────────────────────────────────────────────────────
@@ -214,7 +216,14 @@ window.__ModuleLoader__.load({
         h('span', { style: mismatch ? { ...S.num, color: '#d9534f' } : S.num, title }, route),
         h('span', { style: S.num }, costText),
         h('span', { style: S.dim }, tokenText),
-        h('span', { style: S.dim }, clockOf(row.at)),
+        h('span', { style: S.clock },
+          h('span', { style: S.dim }, clockOf(row.at)),
+          // 只标「日志里真的记着这次释放」的行：宿主重启前释放的 one-shot 没有记录，
+          // 那就什么都不写，而不是猜一个「未释放」。
+          row.releasedAt
+            ? h('span', { style: S.released, title: `释放于 ${clockOf(row.releasedAt)}` }, '已释放')
+            : null,
+        ),
       )
     }
 

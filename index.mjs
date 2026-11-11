@@ -251,8 +251,12 @@ function toolFor(ctx, role, file, provider, released) {
           .catch(() => undefined)
           .then(() => activation.dispose())
           .then(() => {
-            released.push({ child: String(activation.childId), role: role.id, at: Date.now() })
+            const at = Date.now()
+            released.push({ child: String(activation.childId), role: role.id, at })
             if (released.length > 200) released.shift()
+            // 同一个事件也落一行到 Log：内存里的那份重启就没了，而「这一轮到底释放了
+            // 没有」在一小时后仍然要能回答。
+            recordRelease(file, { at, childId: String(activation.childId), role: role.id })
           })
           .catch((error) => console.warn('[dmr] release failed:', error?.message ?? error))
       }
@@ -305,28 +309,51 @@ function recordRound(file, round) {
   }
 }
 
-/** 最新的在前。坏行跳过：一条记录坏掉不该让整块面板消失。 */
+/**
+ * 释放也写一行：`{ kind: 'release', childId, at }`。只留在内存里的话，宿主一重启，
+ * 上一轮那些 one-shot 有没有释放就说不清了——页面只能沉默，而沉默会被读成「没有」。
+ */
+function recordRelease(file, release) {
+  try {
+    appendFileSync(roundsFile(file), `${JSON.stringify({ ...release, kind: 'release' })}\n`, 'utf8')
+  } catch (error) {
+    console.warn('[dmr] cannot record a release:', error?.message ?? error)
+  }
+}
+
+/**
+ * 最新的在前。坏行跳过：一条记录坏掉不该让整块面板消失。
+ * 同一份日志里混着「派活」和「释放」两种行：释放行不进表格，只用来标记对应的那一行。
+ */
 function readRounds(file, limit) {
   let text
   try {
     text = readFileSync(roundsFile(file), 'utf8')
   } catch (error) {
-    if (error?.code === 'ENOENT') return []
+    if (error?.code === 'ENOENT') return { rows: [], released: new Map() }
     throw error
   }
 
   const rounds = []
+  const released = new Map()
   for (const line of text.split('\n')) {
     const trimmed = line.trim()
     if (trimmed === '') continue
     try {
       const parsed = JSON.parse(trimmed)
-      if (parsed && typeof parsed === 'object') rounds.push(parsed)
+      if (!parsed || typeof parsed !== 'object') continue
+      if (parsed.kind === 'release') {
+        if (typeof parsed.childId === 'string') {
+          released.set(parsed.childId, typeof parsed.at === 'number' ? parsed.at : null)
+        }
+        continue
+      }
+      rounds.push(parsed)
     } catch {
       // 半行 / 非 JSON：跳过
     }
   }
-  return rounds.slice(-limit).reverse()
+  return { rows: rounds.slice(-limit).reverse(), released }
 }
 
 function roundsRoute(file) {
@@ -334,9 +361,9 @@ function roundsRoute(file) {
     if (!isLocal(req)) return sendJson(res, 403, { error: 'local access only' })
     if (req.method !== 'GET') return sendJson(res, 405, { error: 'method not allowed' })
 
-    let rounds
+    let recent
     try {
-      rounds = readRounds(file, ROUNDS_ROWS)
+      recent = readRounds(file, ROUNDS_ROWS)
     } catch (error) {
       return sendJson(res, 500, { error: String(error?.message ?? error) })
     }
@@ -345,19 +372,22 @@ function roundsRoute(file) {
     // 解压 + 逐行解析是同步的，所以每算完一行让出一拍：别把宿主的事件循环按住不放。
     const home = dirname(file)
     const rows = []
-    for (const round of rounds) {
+    for (const round of recent.rows) {
       await new Promise((resolve) => setImmediate(resolve))
-      const cost = typeof round.childId === 'string'
-        ? costLib.costOfSession(round.childId, { home })
-        : { status: 'missing' }
+      const childId = typeof round.childId === 'string' ? round.childId : null
+      const cost = childId === null
+        ? { status: 'missing' }
+        : costLib.costOfSession(childId, { home })
       rows.push({
         at: typeof round.at === 'number' ? round.at : null,
         role: typeof round.role === 'string' ? round.role : null,
-        childId: typeof round.childId === 'string' ? round.childId : null,
+        childId,
         provider: typeof round.provider === 'string' ? round.provider : null,
         model: typeof round.model === 'string' ? round.model : null,
         effort: typeof round.effort === 'string' ? round.effort : null,
         lifecycle: typeof round.lifecycle === 'string' ? round.lifecycle : null,
+        // 这一轮是不是真的被 DMR 释放过：只报日志里记着的事，没记着就是 null。
+        releasedAt: childId !== null && recent.released.has(childId) ? recent.released.get(childId) : null,
         cost: cost.status === 'ok'
           ? {
               status: 'ok',
