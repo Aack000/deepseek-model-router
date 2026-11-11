@@ -411,12 +411,13 @@ function checkProfile(rows, home, profileName) {
 
 // ─────────────────────────────── 配置 ───────────────────────────────
 
-function checkRole(rows, id, entry, catalog) {
+function checkRole(rows, id, entry, catalog, why) {
   const route = `${entry.provider}/${entry.model}${entry.effort ? ` @${entry.effort}` : ''}`;
   const lifecycle = entry.lifecycle === 'one-shot' ? 'one-shot' : 'continuable';
 
   if (catalog === null) {
-    rows.push(sub(id, 'warn', `${route} · ${lifecycle} · 目录读不到，未核对`));
+    // 接口都没通时不逐行提醒：端口那一行已经说了原因，这里只标「没核对」。
+    rows.push(sub(id, 'skip', `${route} · ${lifecycle} · 未核对（${why}）`));
     return;
   }
 
@@ -452,7 +453,7 @@ function checkRole(rows, id, entry, catalog) {
   rows.push(sub(id, 'ok', `${route}${shown} · ${lifecycle}`));
 }
 
-function checkRouteTable(rows, home, catalog) {
+function checkRouteTable(rows, home, catalog, why) {
   const file = path.join(home, 'dmr.json');
   const text = readText(file);
 
@@ -496,7 +497,7 @@ function checkRouteTable(rows, home, catalog) {
       rows.push(sub(id, 'skip', '未配置 → 继承父会话'));
       continue;
     }
-    checkRole(rows, id, entry, catalog);
+    checkRole(rows, id, entry, catalog, why);
   }
 }
 
@@ -1053,7 +1054,7 @@ async function main(argv) {
 
     // 先摸接口：角色行的模型核对要用实时目录，而目录只有接口能给。
     state = await probeService(opts.port, home);
-    checkRouteTable(config, home, state.catalog);
+    checkRouteTable(config, home, state.catalog, state.port === null ? 'DSH 没在运行' : '/models 读不出来');
     checkRounds(config, home);
     checkSessions(sessions, home);
     checkEndpoints(endpoints, state, home);
