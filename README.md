@@ -9,7 +9,7 @@
 | 部件 | 作用 |
 |---|---|
 | `index.mjs` | host 插件：注册 `plan_subagent` / `impl_subagent` / `review_subagent`，**每次调用读一遍 `dmr.json`** 决定子代理的 provider/model/effort；另提供插件详情页用的四个接口 |
-| `client.js` | client 插件：注册到 `plugins.detail.section`，在**插件自己的详情页**里画路由表和「最近委派」 |
+| `client.js` | client 插件：注册到 `plugins.detail.section`，在**插件自己的详情页**里画路由表和「最近委派」；文案跟随 DSH 的界面语言（zh / en） |
 | `cordis.patch.yml` | 一行 host 平面插件行（**没有 preset**，见下） |
 | `dmr.example.json` | 路由表示例，复制成 `$DSH_HOME/dmr.json` 后编辑 |
 | `route-check.js` | 角色归属 + 模型核对 + 每轮花费（`--cost`）。期望值取自**该次派活的声明路由**（工具把当时生效的路由写进返回文本），没有声明才回退到当前 `dmr.json`——改表不会误伤历史轮次，「声明 A 实际跑 B」照样抓得出 |
@@ -137,6 +137,18 @@ DMR 不做「关闭按钮」（删不掉目录条目，做出来是假功能）�
 
 实测（2026-11-10）：`85e683b0` → `$0.0221` / 26 次调用、`d93b29e5` → `$0.0809` / 40 次，与 `route-check --cost` 逐位一致；坏行跳过、`childId` 找不到的记 `missing`、非回环地址 403、非 GET 405。
 实测（2026-11-11）：假 ctx 挂 `impl_subagent`（`one-shot`）与 `plan_subagent`（`continuable`），交付后 `impl` 被 dispose，日志里多出一行 `kind: 'release'`，`/rounds` 给 `impl` 的 `releasedAt` 是时间戳、给 `plan` 的是 `null`；坏行与「未知 childId 的释放行」都不影响表格。
+
+### 界面语言（已完成）
+
+DSH 自带官方 locale（`@deepseek-ai/dsh-client-locale`，随包提供 en / zh / ja / es / fr / de / ru / pt 八种语言，在「设置 → 通用 → 语言」里切），面板跟着它走，不再是内联中文：
+
+- 命名空间 `dsh-deepseek-model-route`，注册 `{ zh, en }` 两套字典（官方要求基线语言成对；53 个 key 一一对应，缺 key 会退回显示 key 本身）
+- 组件用槽注入的 `t`（注册时声明 `locale: NS`），切换语言即时生效、不用刷新；槽没给 `t` 时回落到 `ctx.locale.bind(NS)`（它每次调用都看当前语言），所以不会把 key 漏到界面上
+- 其余六种语言按官方的 fallback 链落到英文；数字、金额、`@effort` 这些保持原样，只有界面文案跟着变
+- 插件列表里的标题与说明放在 `locale/zh.json` / `locale/en.json` 的 `meta` 里（官方就是这样给已安装插件做本地化的），`package.json` 导出 `./locale/*.json`，`dsh.client.inject` 里加上 locale 包
+- 改了 `client.js` 仍然要重启 DSH：client 模块表是启动时扫的
+
+实测（2026-11-11）：用最小 hooks 替身把 `client.js` 在 Node 里渲染两遍——`en` 那份文本里没有任何 CJK 字符、`zh` 那份全是中文，两边「已释放 / released」都只出现一次，没有 key 泄漏；槽不给 `t` 时回落到中文，同样不漏 key。
 
 ### 自检：`doctor.js`（已完成）
 
