@@ -83,6 +83,17 @@ node usage-audit.js --cost --since 2026-11-04
 
 模型列取自各子会话日志里**第一条** `request/header`，不是配置推断。三次合计 $0.0181，其中审查一次就 $0.0084——子代理是全额上下文，能自己判断的小改动别派活。
 
+## 可选：前端交付验收（ui-guard）
+
+布局验收由独立工具 ui-guard 承担，**本仓库不含它的任何检测代码**，也不把它列为依赖——装了才用，没装 / 任务不涉及前端就跳过，三阶段流程不受影响。
+
+在 review 环节前的用法（编排层引用，不是插件功能）：
+
+1. 前端改动完成后先调 ui-guard 的 `ui_scan`（MCP）或 `scan --url <dev 地址> --viewports 375,1280 [--actions "click:<选择器>"]`；
+2. 硬错误（溢出 / 裁剪 / 浮层越界 / 按钮点不到或重叠）作为 `review_subagent` 的输入证据，误报由疑似项（S×）与人工判断兜底；
+3. 修复后用 `ui_verify`（或 `verify --baseline <报告路径>`）核对 `new / persisting / fixed` 增量；
+4. 最多 3 轮，未收敛就把完整报告交给人类，不要无限循环。
+
 ## 姊妹项目
 
 [claude-model-router](https://github.com/Aack000/claude-model-router)（CMR）是这套思路的 Claude Code 版本：同样是「规划 / 实现 / 审查」三阶段分工、同样按实际模型核对，但模型是通过 CC Switch 卡片和 `ANTHROPIC_DEFAULT_*_MODEL` 别名钉住的，配置在 `settings.json` 与 preset 里；DMR 是它在 DeepSeek Harness 上的姊妹项目，模型改由 `$DSH_HOME/dmr.json` 决定（每次派活重读），多出面板和按会话日志计价。
